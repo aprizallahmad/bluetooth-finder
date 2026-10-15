@@ -10,6 +10,7 @@ import com.example.bluetoothfinder.domain.NO_RSSI_THRESHOLD
 import com.example.bluetoothfinder.domain.filteredBy
 import com.example.bluetoothfinder.model.BluetoothModel
 import com.example.bluetoothfinder.util.BluetoothPermissions
+import com.example.bluetoothfinder.util.DeviceLog
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
@@ -108,6 +109,20 @@ class BluetoothFinderViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             repository.errors.collect { _events.tryEmit(it) }
+        }
+
+        // ---- Logging Timber (hanya build debug) untuk mengintip data perangkat ----
+        // RAW  : seluruh daftar dari repository (array of object), sebelum difilter.
+        // UI    : daftar yang benar-benar dirender di LazyColumn (sudah difilter + terurut).
+        viewModelScope.launch {
+            repository.devices.collect { list ->
+                DeviceLog.logDevices("RAW", "dari repository (sebelum filter)", list.toUiModels())
+            }
+        }
+        viewModelScope.launch {
+            devices.collect { list ->
+                DeviceLog.logDevices("UI", "dirender di LazyColumn (setelah filter)", list)
+            }
         }
     }
 
@@ -222,6 +237,9 @@ class BluetoothFinderViewModel @Inject constructor(
         private const val BLUETOOTH_POLL_INTERVAL_MS = 1_500L
     }
 }
+
+/** Konversi daftar domain menjadi model UI (dipakai juga untuk logging RAW). */
+fun List<BleDevice>.toUiModels(): List<BluetoothModel> = map { it.toUiModel() }
 
 fun BleDevice.toUiModel(): BluetoothModel = BluetoothModel(
     id = address.hashCode(),

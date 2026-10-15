@@ -34,6 +34,8 @@ android {
     }
     buildFeatures {
         compose = true
+        // Dibutuhkan App.kt untuk membedakan build debug (logging aktif) vs release.
+        buildConfig = true
     }
 }
 
@@ -60,6 +62,9 @@ dependencies {
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
+
+    // Timber (logging debug data perangkat; hanya ditanam di build debug — lihat App.kt)
+    implementation(libs.timber)
 
     // Room (local persistence - riwayat perangkat)
     implementation(libs.room.runtime)

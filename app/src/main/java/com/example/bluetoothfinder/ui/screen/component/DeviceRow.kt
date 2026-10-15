@@ -8,12 +8,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import com.example.bluetoothfinder.model.BluetoothModel
 import com.example.bluetoothfinder.ui.theme.signalColor
+import com.example.bluetoothfinder.util.DeviceLog
 
 /**
  * Satu baris pada daftar perangkat:
@@ -42,6 +44,12 @@ fun DeviceRow(
         colorScheme.onSurface.copy(alpha = 0.45f)
     } else {
         colorScheme.onSurface
+    }
+
+    // Logging Timber (hanya build debug): cetak object saat baris ini dirender di LazyColumn.
+    // SideEffect -> berjalan sekali per set-composition baris, tidak mengulang tiap recomposition.
+    SideEffect {
+        DeviceLog.logDeviceRender(device)
     }
 
     Row(

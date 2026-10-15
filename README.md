@@ -229,6 +229,11 @@ com.example.bluetoothfinder
   (`lastSeen` tetap memakai waktu paket asli agar deteksi *Sinyal Hilang* akurat).
 - **Asumsi: penyimpanan riwayat di-throttle 2 detik per perangkat** agar database tidak
   dibanjiri (nilai final selalu di-flush saat scan berhenti).
+- **Asumsi: logging data perangkat (Timber) hanya untuk build debug.** Untuk memudahkan
+  pengujian, data perangkat dicetak ke Logcat (tag `DeviceData`): (1) seluruh daftar
+  *array of object* saat data diterima repository, dan (2) *object* lengkap tiap baris
+  saat dirender di LazyColumn. Ditanam hanya di `App.onCreate` untuk `BuildConfig.DEBUG`,
+  sehingga di build release tidak ada tree yang ditanam dan panggilan logging jadi no-op.
 - **Dilarangnya location untuk `neverForLocation`** — `BLUETOOTH_SCAN` dideklarasikan
   dengan `android:usesPermissionFlags="neverForLocation"` sehingga tidak perlu izin lokasi
   di Android 12+ (berkurangnya permintaan izin ke pengguna).
