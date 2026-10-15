@@ -9,22 +9,21 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.example.bluetoothfinder.ui.screen.TitleText
 
-
+/**
+ * Header tabel daftar perangkat: Nama+MAC, RSSI mentah, dan estimasi jarak.
+ */
 @Composable
 fun HeaderData() {
-    Column() {
+    Column {
         Spacer(Modifier.height(2.dp))
         Row(
-            modifier = Modifier
-                .fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            TitleText(text = "RSSI", modifier = Modifier.weight(1f))
-            TitleText(text = "Distance", modifier = Modifier.weight(1f))
-            TitleText(text = "Signal Strength", modifier = Modifier.weight(1f))
+            TitleText(text = "Perangkat", modifier = Modifier.weight(1.4f))
+            TitleText(text = "RSSI", modifier = Modifier.weight(0.8f))
+            TitleText(text = "Jarak", modifier = Modifier.weight(1.2f))
         }
     }
 }
-
