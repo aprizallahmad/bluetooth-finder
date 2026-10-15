@@ -3,7 +3,12 @@ package com.example.bluetoothfinder.data.ble
 import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothGatt
+import android.bluetooth.BluetoothGattCallback
+import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
@@ -23,6 +28,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.UUID
+import java.util.concurrent.TimeoutException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -86,6 +93,13 @@ class AndroidBleScanner @Inject constructor(
 
     private var flushJob: Job? = null
     private var isScanning = false
+
+    // --------------------------------------------------------- GATT name reading
+
+    private var gatt: BluetoothGatt? = null
+    private var nameReadCallback: ((Result<String>) -> Unit)? = null
+    private var nameReadJob: Job? = null
+    private var nameTargetAddress: String? = null
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
@@ -310,6 +324,143 @@ class AndroidBleScanner @Inject constructor(
         _devices.value = deviceStates.toMap()
     }
 
+    /**
+     * Membaca nama perangkat via koneksi GATT (service Generic Access `0x1800`,
+     * characteristic Device Name `0x2A00`). Hasilnya persis nama di Pengaturan ->
+     * Bluetooth perangkat, sehingga tetap terbaca meski perangkat tidak broadcast
+     * namanya (kasus HP Android/iOS). Selalu menutup koneksi setelah selesai.
+     */
+    override fun readDeviceName(address: String, onResult: (Result<String>) -> Unit) {
+        val adapter = adapter
+        if (adapter == null || !BluetoothPermissions.hasAll(context)) {
+            onResult(Result.failure(IllegalStateException("Bluetooth atau izin tidak siap.")))
+            return
+        }
+        val device = try {
+            adapter.getRemoteDevice(address)
+        } catch (e: IllegalArgumentException) {
+            onResult(Result.failure(e))
+            return
+        }
+
+        // Satu koneksi pada satu waktu: batal pembacaan sebelumnya bila ada.
+        nameReadCallback?.invoke(
+            Result.failure(IllegalStateException("Pembacaan nama lain sedang berlangsung."))
+        )
+        closeGatt()
+        nameReadCallback = onResult
+        nameTargetAddress = address
+
+        // Batas waktu agar layar tidak menunggu tanpa kejelasan.
+        nameReadJob = scope.launch {
+            delay(NAME_READ_TIMEOUT_MS)
+            finishNameRead(Result.failure(TimeoutException("Waktu membaca nama perangkat habis.")))
+        }
+
+        gatt = try {
+            device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+        } catch (se: SecurityException) {
+            finishNameRead(Result.failure(se))
+            null
+        }
+    }
+
+    private val gattCallback = object : BluetoothGattCallback() {
+        override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
+            when {
+                status != BluetoothGatt.GATT_SUCCESS -> finishNameRead(
+                    Result.failure(IllegalStateException("Koneksi ke perangkat gagal (status $status)."))
+                )
+
+                newState == BluetoothProfile.STATE_CONNECTED -> g.discoverServices()
+
+                newState == BluetoothProfile.STATE_DISCONNECTED -> finishNameRead(
+                    Result.failure(IllegalStateException("Perangkat terputus sebelum nama terbaca."))
+                )
+            }
+        }
+
+        override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                finishNameRead(
+                    Result.failure(IllegalStateException("Gagal menemui service perangkat."))
+                )
+                return
+            }
+            val characteristic = g.getService(DEVICE_NAME_SERVICE_UUID)
+                ?.getCharacteristic(DEVICE_NAME_CHAR_UUID)
+            if (characteristic == null) {
+                finishNameRead(
+                    Result.failure(IllegalStateException("Perangkat tidak menyediakan karakteristik nama."))
+                )
+                return
+            }
+            @Suppress("DEPRECATION")
+            if (!g.readCharacteristic(characteristic)) {
+                finishNameRead(
+                    Result.failure(IllegalStateException("Gagal memulai pembacaan nama."))
+                )
+            }
+        }
+
+        // Signature lama dipertahankan agar kompatibel dari API 24; pada API 33+
+        // sistem meneruskan panggilan ke method ini bila override baru tidak ditulis.
+        @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+        override fun onCharacteristicRead(
+            g: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int,
+        ) {
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                finishNameRead(
+                    Result.failure(IllegalStateException("Gagal membaca nama (status $status)."))
+                )
+                return
+            }
+            val name = characteristic.value
+                ?.toString(Charsets.UTF_8)
+                ?.trim()
+                .orEmpty()
+            if (name.isBlank()) {
+                finishNameRead(Result.failure(IllegalStateException("Nama perangkat kosong.")))
+            } else {
+                finishNameRead(Result.success(name))
+            }
+        }
+    }
+
+    /**
+     * Menyelesaikan satu siklus pembacaan nama: tutup koneksi, simpan nama hasil
+     * baca ke cache (agar daftar & riwayat ikut menampilkan nama), lalu panggil callback.
+     */
+    private fun finishNameRead(result: Result<String>) {
+        val callback = nameReadCallback ?: return
+        val address = nameTargetAddress
+        nameReadCallback = null
+        nameTargetAddress = null
+        nameReadJob?.cancel()
+        nameReadJob = null
+        closeGatt()
+
+        scope.launch {
+            if (address != null) {
+                result.onSuccess { name ->
+                    knownNames[address] = name
+                    deviceStates[address]?.let { current ->
+                        deviceStates[address] = current.copy(name = name)
+                        _devices.value = deviceStates.toMap()
+                    }
+                }
+            }
+            callback(result)
+        }
+    }
+
+    private fun closeGatt() {
+        runCatching { gatt?.close() }
+        gatt = null
+    }
+
     private fun emitError(message: String) {
         _errors.tryEmit(message)
     }
@@ -334,6 +485,17 @@ class AndroidBleScanner @Inject constructor(
          * walau paket advertising datang jauh lebih sering (SCAN_MODE_LOW_LATENCY).
          */
         const val UI_REFRESH_INTERVAL_MS = 1_000L
+
+        /** Batas waktu membaca nama perangkat via koneksi GATT. */
+        const val NAME_READ_TIMEOUT_MS = 8_000L
+
+        /** Service Generic Access (wajib ada di setiap perangkat GATT). */
+        private val DEVICE_NAME_SERVICE_UUID: UUID =
+            UUID.fromString("00001800-0000-1000-8000-00805f9b34fb")
+
+        /** Characteristic Device Name: persis nama di Pengaturan -> Bluetooth perangkat. */
+        private val DEVICE_NAME_CHAR_UUID: UUID =
+            UUID.fromString("00002a00-0000-1000-8000-00805f9b34fb")
 
         const val ANONYMOUS_ADDRESS = "02:00:00:00:00:00"
     }

@@ -20,6 +20,13 @@ interface DeviceDao {
     @Upsert
     suspend fun upsert(entity: DeviceHistoryEntity)
 
+    /**
+     * Memperbarui nama perangkat pada riwayat (dipakai saat nama berhasil dibaca
+     * via koneksi GATT untuk perangkat yang tidak mengiklankan namanya).
+     */
+    @Query("UPDATE device_history SET name = :name WHERE address = :address")
+    suspend fun updateName(address: String, name: String)
+
     @Query("DELETE FROM device_history")
     suspend fun clearHistory(): Int
 }

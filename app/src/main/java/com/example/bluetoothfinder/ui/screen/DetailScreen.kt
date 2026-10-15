@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,6 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -27,6 +29,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -69,6 +72,8 @@ fun DetailScreen(
     val history by viewModel.history.collectAsStateWithLifecycle()
     val isLost by viewModel.isLost.collectAsStateWithLifecycle()
     val bluetoothOn by viewModel.bluetoothOn.collectAsStateWithLifecycle()
+    val nameReading by viewModel.nameReading.collectAsStateWithLifecycle()
+    val nameFailed by viewModel.nameFailed.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -235,6 +240,17 @@ fun DetailScreen(
             ) {
                 Column(Modifier.padding(16.dp)) {
                     InfoRow("Nama perangkat", deviceName)
+
+                    // Nama tidak tersedia dari iklan BLE -> tawarkan pembacaan via GATT
+                    // (persis nama di Pengaturan -> Bluetooth perangkat).
+                    if (target?.name == BleDevice.UNKNOWN_NAME || (target == null && nameFailed)) {
+                        NameResolveRow(
+                            reading = nameReading,
+                            failed = nameFailed,
+                            onRetry = viewModel::onRetryName,
+                        )
+                    }
+
                     InfoRow("Alamat (MAC / UUID)", viewModel.address.ifBlank { "-" })
                     InfoRow(
                         "RSSI mentah",
@@ -308,6 +324,63 @@ private fun InfoRow(label: String, value: String) {
             textAlign = TextAlign.End,
             modifier = Modifier.weight(1f),
         )
+    }
+}
+
+/**
+ * Baris tambahan di bawah "Nama perangkat": status pembacaan nama via koneksi GATT
+ * untuk perangkat yang tidak mengiklankan namanya, plus tombol coba lagi.
+ */
+@Composable
+private fun NameResolveRow(
+    reading: Boolean,
+    failed: Boolean,
+    onRetry: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        when {
+            reading -> {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                )
+                Text(
+                    text = "Membaca nama langsung dari perangkat...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            failed -> {
+                Text(
+                    text = "Perangkat tidak siap terhubung — nama tidak dapat dibaca.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onRetry) {
+                    Text("Coba lagi", fontWeight = FontWeight.SemiBold)
+                }
+            }
+
+            else -> {
+                Text(
+                    text = "Nama tidak disiarkan perangkat (wajar untuk HP).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onRetry) {
+                    Text("Baca nama", fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
     }
 }
 

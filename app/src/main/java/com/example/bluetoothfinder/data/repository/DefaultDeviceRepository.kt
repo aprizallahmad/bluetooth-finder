@@ -123,6 +123,16 @@ class DefaultDeviceRepository @Inject constructor(
         bleScanner.stopScan()
     }
 
+    override fun readDeviceName(address: String, onResult: (Result<String>) -> Unit) {
+        bleScanner.readDeviceName(address) { result ->
+            // Simpan nama hasil baca GATT ke riwayat lokal agar tampil juga di History.
+            result.onSuccess { name ->
+                scope.launch { runCatching { deviceDao.updateName(address, name) } }
+            }
+            onResult(result)
+        }
+    }
+
     override fun refreshBluetoothState() = bleScanner.refreshBluetoothState()
 
     override suspend fun clearHistory() {

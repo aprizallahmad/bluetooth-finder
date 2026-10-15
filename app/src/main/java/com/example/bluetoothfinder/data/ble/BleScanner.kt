@@ -42,6 +42,19 @@ interface BleScanner {
     fun stopScan()
 
     /**
+     * Membaca nama perangkat **langsung dari perangkat target** lewat koneksi GATT
+     * (characteristic Device Name `0x2A00` pada service Generic Access `0x1800`).
+     *
+     * Nama hasil pembacaan ini persis sama dengan nama di Pengaturan -> Bluetooth
+     * perangkat tersebut, sehingga tetap bisa diketahui meski perangkat tidak
+     * mengiklankan namanya dalam paket iklan (kasus umum pada HP Android/iOS).
+     *
+     * @param onResult dipanggil di main thread; [Result.failure] bila perangkat
+     *   tidak connectable, putus, atau tidak menyediakan karakteristik nama.
+     */
+    fun readDeviceName(address: String, onResult: (Result<String>) -> Unit)
+
+    /**
      * Memeriksa ulang status adapter Bluetooth.
      * Dipanggil berkala oleh ViewModel selama aplikasi aktif agar perubahan
      * (pengguna mematikan Bluetooth) tertangkap tanpa broadcast receiver.

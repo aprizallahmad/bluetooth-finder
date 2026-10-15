@@ -32,6 +32,13 @@ interface DeviceRepository {
 
     fun stopScan()
 
+    /**
+     * Membaca nama perangkat langsung dari perangkat target lewat koneksi GATT
+     * (characteristic Device Name `0x2A00`) dan menyimpannya ke riwayat lokal
+     * bila berhasil. Lihat [com.example.bluetoothfinder.data.ble.BleScanner.readDeviceName].
+     */
+    fun readDeviceName(address: String, onResult: (Result<String>) -> Unit)
+
     fun refreshBluetoothState()
 
     suspend fun clearHistory()

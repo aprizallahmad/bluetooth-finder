@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
@@ -38,7 +40,8 @@ class RadarViewModel @Inject constructor(
 ) : ViewModel() {
 
     val address: String = savedStateHandle.get<String>(ARG_ADDRESS)
-        ?.let { android.net.Uri.decode(it) }
+        // runCatching: Uri.decode bisa gagal pada unit test (stub) -> pakai nilai asli.
+        ?.let { raw -> runCatching { android.net.Uri.decode(raw) }.getOrDefault(raw) }
         .orEmpty()
 
     /** Perangkat target yang sedang dilacak (null bila belum terlihat di sesi ini). */
@@ -64,6 +67,16 @@ class RadarViewModel @Inject constructor(
     private val _isLost = MutableStateFlow(true)
     val isLost: StateFlow<Boolean> = _isLost.asStateFlow()
 
+    /** True selama nama perangkat dibaca via koneksi GATT (bila tidak diiklankan). */
+    private val _nameReading = MutableStateFlow(false)
+    val nameReading: StateFlow<Boolean> = _nameReading.asStateFlow()
+
+    /** True bila pembacaan nama via GATT gagal (perangkat tidak connectable, dll). */
+    private val _nameFailed = MutableStateFlow(false)
+    val nameFailed: StateFlow<Boolean> = _nameFailed.asStateFlow()
+
+    private var nameReadTried = false
+
     private val _events = MutableSharedFlow<String>(
         extraBufferCapacity = 8,
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
@@ -86,6 +99,43 @@ class RadarViewModel @Inject constructor(
         }
         viewModelScope.launch {
             repository.errors.collect { _events.tryEmit(it) }
+        }
+        viewModelScope.launch {
+            // Begitu target terlihat pertama kali, baca langsung namanya via GATT
+            // bila nama tidak tersedia dari iklan BLE (kasus umum: HP).
+            target.filterNotNull().first()
+            maybeResolveName()
+        }
+    }
+
+    /**
+     * Membaca nama perangkat via koneksi GATT (characteristic Device Name 0x2A00)
+     * untuk target yang namanya tidak dibroadcast dalam iklan BLE. Nama hasil baca
+     * sama dengan nama di Pengaturan -> Bluetooth perangkat tersebut dan otomatis
+     * tersinkron ke daftar scan + riwayat.
+     */
+    private fun maybeResolveName() {
+        if (nameReadTried || address.isBlank()) return
+        val current = target.value ?: return
+        if (current.name != BleDevice.UNKNOWN_NAME) return
+        resolveName()
+    }
+
+    /** Percobaan ulang membaca nama (dipanggil tombol "Coba lagi" di layar Detail). */
+    fun onRetryName() {
+        if (address.isBlank() || _nameReading.value) return
+        resolveName()
+    }
+
+    private fun resolveName() {
+        nameReadTried = true
+        _nameReading.value = true
+        _nameFailed.value = false
+        repository.readDeviceName(address) { result ->
+            _nameReading.value = false
+            result
+                .onSuccess { name -> _events.tryEmit("Nama perangkat ditemukan: $name") }
+                .onFailure { _nameFailed.value = true }
         }
     }
 

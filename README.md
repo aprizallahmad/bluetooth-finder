@@ -17,7 +17,7 @@ lokal (Room) sehingga tidak hilang saat aplikasi ditutup.
 |---|-----------|--------------|
 | 2.1 | Pemindaian perangkat | `AndroidBleScanner` memakai `BluetoothLeScanner` (mode *low latency*) dengan **throttle tampilan 1 detik per flush** agar data live tidak bergetar. Menampilkan **Nama**, **MAC Address/UUID**, **estimasi jarak**, dan **RSSI mentah (dBm)**. Tombol **Start/Scan** & **Stop** pada `BotBar`. |
 | 2.2 | Filter & pengurutan | Daftar selalu diurutkan otomatis dari **RSSI terkuat** (repository, EMA agar stabil). Search bar memfilter berdasarkan **nama** atau **MAC address**; chip filter membatasi **ambang minimum sinyal** (mis. hanya `≥ -80 dBm`, memakai RSSI mentah = angka di layar). |
-| 2.3 | Pelacakan target / Radar | Tap satu perangkat → layar **Detail Pelacakan**: radar beranimasi, jarak & kategori berubah warna mengikuti tabel RSSI, plus kartu detail koneksi (RSSI raw/EMA, Tx Power, terakhir terdeteksi, status Live/Lost). |
+| 2.3 | Pelacakan target / Radar | Tap satu perangkat → layar **Detail Pelacakan**: radar beranimasi, jarak & kategori berubah warna mengikuti tabel RSSI, plus kartu detail koneksi (RSSI raw/EMA, Tx Power, terakhir terdeteksi, status Live/Lost). Untuk perangkat tanpa nama (mis. HP), tersedia **pembacaan nama via koneksi GATT** (Device Name `0x2A00`). |
 | 2.4 | Penyimpanan lokal | Room (`device_history`): nama, alamat, waktu pertama & terakhir terlihat, RSSI terakhir, RSSI terkuat, jumlah deteksi. |
 | 3.1 | Screen 1: Dashboard (Scanner) | `HomeScreen` |
 | 3.2 | Screen 2: Detail Pelacakan (Radar) | `DetailScreen` |
@@ -177,7 +177,9 @@ com.example.bluetoothfinder
    (kebijakan privasi Android 10+ untuk iklan). Aplikasi memberi fallback ID stabil agar
    daftar & pelacakan tetap berfungsi.
 4. **Nama perangkat** hanya muncul jika perangkat mengiklankannya; jika tidak, ditampilkan
-   `Tanpa Nama`.
+   `Tanpa Nama` + opsi **"Baca nama"** yang membaca nama **langsung dari perangkat** via
+   koneksi GATT (characteristic Device Name `0x2A00`) — hasilnya persis nama di
+   Pengaturan -> Bluetooth perangkat (berlaku untuk HP yang tidak broadcast namanya).
 5. **Scanning dihentikan otomatis saat aplikasi ke latar belakang** (> 3 detik) — ini disengaja
    (praktik hemat baterai & anjuran Android) dan **berlaku di level aplikasi**
    (`ProcessLifecycleOwner`): berpindah layar (Scanner → Radar) **tidak** menghentikan scan,
@@ -235,4 +237,6 @@ com.example.bluetoothfinder
   kategori & label jarak sesuai tabel brief, serta skala radar monoton.
 - `DeviceFilterTest` — pengurutan dari sinyal terkuat (EMA), filter nama/MAC
   (case-insensitive), dan filter ambang sinyal yang memakai nilai RSSI mentah.
+- `RadarViewModelTest` — alur pembacaan nama via GATT (otomatis saat target tanpa nama,
+  status loading/gagal, dan percobaan ulang).
 ```
