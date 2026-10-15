@@ -159,7 +159,7 @@ fun HistoryScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(history, key = { it.address }) { entity ->
+                items(history.distinctBy { it.address }, key = { it.address }) { entity ->
                     HistoryRow(entity = entity)
                 }
             }

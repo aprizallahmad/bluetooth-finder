@@ -74,7 +74,6 @@ fun HomeScreen(
     navController: NavHostController,
     viewModel: BluetoothFinderViewModel = hiltViewModel(),
 ) {
-    val context = LocalContext.current
 
     val devices by viewModel.devices.collectAsStateWithLifecycle()
     val scanStatus by viewModel.scanStatus.collectAsStateWithLifecycle()
@@ -85,6 +84,11 @@ fun HomeScreen(
     val hideStale by viewModel.hideStale.collectAsStateWithLifecycle()
     val totalDevices by viewModel.totalDevices.collectAsStateWithLifecycle()
     val activeDevices by viewModel.activeDevices.collectAsStateWithLifecycle()
+// Indikator filter: jumlah yang tampil vs total, agar efek filter langsung terlihat.
+    val hasFilter =
+        query.isNotBlank() ||
+                minRssi != BluetoothFinderViewModel.NO_THRESHOLD ||
+                hideStale
 
     val snackbarHostState = remember { SnackbarHostState() }
     val isScanning = scanStatus == ScanStatus.SCANNING
@@ -178,69 +182,6 @@ fun HomeScreen(
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp),
         ) {
-            if (!hasPermissions) {
-                StatusBanner(
-                    icon = Icons.Filled.Lock,
-                    title = "Izin Bluetooth diperlukan",
-                    message = if (BluetoothPermissions.isLegacyLocationBased)
-                        "Aplikasi membutuhkan izin lokasi untuk memindai perangkat BLE di sekitar."
-                    else
-                        "Aplikasi membutuhkan izin Bluetooth untuk memindai perangkat di sekitar.",
-                    actionLabel = "Izinkan",
-                    onAction = { permissionLauncher.launch(BluetoothPermissions.required()) },
-                )
-            } else if (!bluetoothOn) {
-                StatusBanner(
-                    icon = Icons.Filled.BluetoothDisabled,
-                    title = "Bluetooth nonaktif",
-                    message = "Aktifkan Bluetooth untuk memindai perangkat di sekitar.",
-                    actionLabel = "Aktifkan",
-                    onAction = {
-                        enableBluetoothLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
-                    },
-                )
-            }
-
-            FilterBar(
-                query = query,
-                minRssi = minRssi,
-                hideStale = hideStale,
-                onQueryChange = viewModel::onQueryChange,
-                onMinRssiChange = viewModel::onMinRssiChange,
-                onHideStaleChange = viewModel::onHideStaleChange,
-                modifier = Modifier.padding(top = 12.dp),
-            )
-
-            // Indikator filter: jumlah yang tampil vs total, agar efek filter langsung terlihat.
-            val hasFilter =
-                query.isNotBlank() ||
-                    minRssi != BluetoothFinderViewModel.NO_THRESHOLD ||
-                    hideStale
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = buildString {
-                        append("Menampilkan ${devices.size} dari $totalDevices perangkat")
-                        val lost = totalDevices - activeDevices
-                        if (lost > 0) append(" (").append(activeDevices).append(" aktif • ")
-                            .append(lost).append(" hilang)")
-                        if (hasFilter) append(" • ").append(viewModel.activeFilterDescription())
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                if (hasFilter) {
-                    TextButton(onClick = { viewModel.clearFilters() }) {
-                        Text("Reset filter", fontWeight = FontWeight.SemiBold)
-                    }
-                }
-            }
-
             if (devices.isEmpty()) {
                 EmptyScanState(
                     hasPermissions = hasPermissions,
@@ -260,6 +201,66 @@ fun HomeScreen(
                         .padding(top = 12.dp),
                     contentPadding = PaddingValues(bottom = 16.dp),
                 ) {
+                    item(key = "title"){
+                        if (!hasPermissions) {
+                            StatusBanner(
+                                icon = Icons.Filled.Lock,
+                                title = "Izin Bluetooth diperlukan",
+                                message = if (BluetoothPermissions.isLegacyLocationBased)
+                                    "Aplikasi membutuhkan izin lokasi untuk memindai perangkat BLE di sekitar."
+                                else
+                                    "Aplikasi membutuhkan izin Bluetooth untuk memindai perangkat di sekitar.",
+                                actionLabel = "Izinkan",
+                                onAction = { permissionLauncher.launch(BluetoothPermissions.required()) },
+                            )
+                        } else if (!bluetoothOn) {
+                            StatusBanner(
+                                icon = Icons.Filled.BluetoothDisabled,
+                                title = "Bluetooth nonaktif",
+                                message = "Aktifkan Bluetooth untuk memindai perangkat di sekitar.",
+                                actionLabel = "Aktifkan",
+                                onAction = {
+                                    enableBluetoothLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+                                },
+                            )
+                        }
+
+                        FilterBar(
+                            query = query,
+                            minRssi = minRssi,
+                            hideStale = hideStale,
+                            onQueryChange = viewModel::onQueryChange,
+                            onMinRssiChange = viewModel::onMinRssiChange,
+                            onHideStaleChange = viewModel::onHideStaleChange,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = buildString {
+                                    append("Menampilkan ${devices.size} dari $totalDevices perangkat")
+                                    val lost = totalDevices - activeDevices
+                                    if (lost > 0) append(" (").append(activeDevices).append(" aktif • ")
+                                        .append(lost).append(" hilang)")
+                                    if (hasFilter) append(" • ").append(viewModel.activeFilterDescription())
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (hasFilter) {
+                                TextButton(onClick = { viewModel.clearFilters() }) {
+                                    Text("Reset filter", fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
+                    }
                     item(key = "header") { HeaderData() }
                     items(devices, key = { it.macAddress }) { device ->
                         DeviceRow(
