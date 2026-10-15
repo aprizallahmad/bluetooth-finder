@@ -30,7 +30,8 @@ import com.example.bluetoothfinder.viewmodel.BluetoothFinderViewModel
 /**
  * Bagian filter Screen 1:
  * - kolom pencarian berdasarkan nama perangkat / MAC address,
- * - ambang batas minimum sinyal (mis. hanya tampilkan perangkat ≥ -80 dBm).
+ * - ambang batas minimum sinyal (mis. hanya tampilkan perangkat ≥ -80 dBm),
+ * - opsi menyembunyikan perangkat yang hilang sinyal (retensi: default tetap tampil redup).
  *
  * Filter diterapkan langsung saat mengetik / menekan chip (tidak perlu tombol terpisah).
  */
@@ -38,8 +39,10 @@ import com.example.bluetoothfinder.viewmodel.BluetoothFinderViewModel
 fun FilterBar(
     query: String,
     minRssi: Int,
+    hideStale: Boolean,
     onQueryChange: (String) -> Unit,
     onMinRssiChange: (Int) -> Unit,
+    onHideStaleChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
@@ -88,6 +91,14 @@ fun FilterBar(
                     },
                 )
             }
+            ThresholdChip(
+                label = "Sembunyikan hilang",
+                selected = hideStale,
+                onClick = {
+                    focusManager.clearFocus()
+                    onHideStaleChange(!hideStale)
+                },
+            )
         }
     }
 }

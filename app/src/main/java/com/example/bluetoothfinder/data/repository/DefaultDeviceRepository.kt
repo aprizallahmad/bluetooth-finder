@@ -1,8 +1,5 @@
 package com.example.bluetoothfinder.data.repository
 
-import androidx.lifecycle.DefaultLifecycleObserver
-import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.ProcessLifecycleOwner
 import com.example.bluetoothfinder.data.ble.BleScanner
 import com.example.bluetoothfinder.data.ble.ScanStatus
 import com.example.bluetoothfinder.data.local.DeviceDao
@@ -11,8 +8,6 @@ import com.example.bluetoothfinder.di.ApplicationScope
 import com.example.bluetoothfinder.domain.BleDevice
 import com.example.bluetoothfinder.domain.sortedBySignal
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -28,6 +23,9 @@ import javax.inject.Singleton
  * - Menyediakan daftar perangkat yang sudah diurutkan otomatis RSSI tertinggi.
  * - Menulis riwayat ke Room dengan throttle [PERSIST_INTERVAL_MS] agar database
  *   tidak dibanjiri puluhan tulisan per detik saat sinyal berubah cepat.
+ *
+ * Kontrol scan sepenuhnya di tangan pengguna (tombol Start/Stop sesuai brief) —
+ * tidak ada penjeda/penghentian otomatis berdasarkan lifecycle aplikasi.
  */
 @Singleton
 class DefaultDeviceRepository @Inject constructor(
@@ -47,46 +45,7 @@ class DefaultDeviceRepository @Inject constructor(
 
     private val lastPersistedAt = mutableMapOf<String, Long>()
 
-    /** True bila pengguna menginginkan scan tetap aktif (dipakai untuk resume otomatis). */
-    private var userWantsScan = false
-
-    /** True bila scan dijeda otomatis karena aplikasi masuk ke latar belakang. */
-    private var pausedByBackground = false
-
-    private var backgroundPauseJob: Job? = null
-
-    /**
-     * Observer pada **lifecycle aplikasi** (bukan lifecycle layar/nav-entry).
-     *
-     * Penting: saat berpindah layar (mis. Scanner -> Radar), Activity tetap RESUMED sehingga
-     * scan tidak pernah ikut berhenti. Scan hanya dijeda ketika aplikasi benar-benar
-     * masuk latar belakang, dan dilanjutkan otomatis saat kembali ke depan.
-     */
-    private val appLifecycleObserver = object : DefaultLifecycleObserver {
-        override fun onStart(owner: LifecycleOwner) {
-            backgroundPauseJob?.cancel()
-            backgroundPauseJob = null
-            if (pausedByBackground && userWantsScan) {
-                pausedByBackground = false
-                bleScanner.startScan()
-            }
-        }
-
-        override fun onStop(owner: LifecycleOwner) {
-            backgroundPauseJob?.cancel()
-            backgroundPauseJob = scope.launch {
-                delay(BACKGROUND_PAUSE_DELAY_MS)
-                if (bleScanner.status.value == ScanStatus.SCANNING) {
-                    pausedByBackground = true
-                    bleScanner.stopScan()
-                }
-            }
-        }
-    }
-
     init {
-        ProcessLifecycleOwner.get().lifecycle.addObserver(appLifecycleObserver)
-
         scope.launch {
             bleScanner.devices.collect { snapshot ->
                 _devices.value = snapshot.values.toList().sortedBySignal()
@@ -107,21 +66,9 @@ class DefaultDeviceRepository @Inject constructor(
     override fun observeDevice(address: String): Flow<DeviceHistoryEntity?> =
         deviceDao.observeByAddress(address)
 
-    override fun startScan() {
-        userWantsScan = true
-        pausedByBackground = false
-        backgroundPauseJob?.cancel()
-        backgroundPauseJob = null
-        bleScanner.startScan()
-    }
+    override fun startScan() = bleScanner.startScan()
 
-    override fun stopScan() {
-        userWantsScan = false
-        pausedByBackground = false
-        backgroundPauseJob?.cancel()
-        backgroundPauseJob = null
-        bleScanner.stopScan()
-    }
+    override fun stopScan() = bleScanner.stopScan()
 
     override fun readDeviceName(address: String, onResult: (Result<String>) -> Unit) {
         bleScanner.readDeviceName(address) { result ->
@@ -178,8 +125,5 @@ class DefaultDeviceRepository @Inject constructor(
     private companion object {
         /** Minimal jeda tulisan per perangkat ke database. */
         const val PERSIST_INTERVAL_MS = 2_000L
-
-        /** Jeda sebelum scan dihentikan saat aplikasi masuk latar belakang. */
-        const val BACKGROUND_PAUSE_DELAY_MS = 3_000L
     }
 }

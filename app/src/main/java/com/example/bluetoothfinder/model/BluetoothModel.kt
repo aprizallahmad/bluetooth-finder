@@ -9,6 +9,9 @@ package com.example.bluetoothfinder.model
  *   angka yang dilihat pengguna = angka yang difilter.
  * @property indicatorRssi RSSI hasil EMA (halus) — dipakai untuk **warna indikator**
  *   agar warna/kategori tidak berkedip tiap paket.
+ * @property isStale true bila perangkat **hilang sinyal** (tidak terlihat ≥ 15 dtk).
+ *   Perangkat hilang tetap ditampilkan (retensi sesi) tapi dirender redup dengan
+ *   keterangan "terakhir terlihat"; otomatis nyala lagi saat paket masuk.
  */
 data class BluetoothModel(
     val id: Int,
@@ -22,4 +25,5 @@ data class BluetoothModel(
     val smoothedRssiValue: Int = 0,
     val distanceMeters: Double = 0.0,
     val lastSeen: Long = 0L,
+    val isStale: Boolean = false,
 )

@@ -32,15 +32,13 @@ import javax.inject.Inject
  * ViewModel untuk Screen 1 (Dashboard / Scanner).
  *
  * Menangani:
- * - kontrol Start / Stop pemindaian,
- * - filter pencarian (nama / MAC) & ambang batas minimum RSSI,
- * - pengurutan otomatis RSSI tertinggi (dilakukan repository),
+ * - kontrol Start / Stop pemindaian (scan **hanya** berhenti lewat tombol Stop;
+ *   tidak ada auto-pause di background — sesuai brief),
+ * - filter pencarian (nama / MAC), ambang batas minimum RSSI, & opsi sembunyikan
+ *   perangkat hilang,
+ * - pengurutan otomatis RSSI tertinggi (perangkat hidup di atas yang hilang),
  * - error handling izin, Bluetooth mati, dan kegagalan scan,
  * - polling status Bluetooth selama layar terlihat.
- *
- * Catatan lifecycle: penjeda scan saat aplikasi ke latar belakang ditangani oleh
- * repository (berbasis `ProcessLifecycleOwner`), **bukan** lifecycle layar ini,
- * sehingga berpindah layar (Scanner -> Radar) tidak pernah menghentikan scan.
  */
 @HiltViewModel
 class BluetoothFinderViewModel @Inject constructor(
@@ -56,6 +54,9 @@ class BluetoothFinderViewModel @Inject constructor(
 
     private val _minRssi = MutableStateFlow(NO_THRESHOLD)
     val minRssi: StateFlow<Int> = _minRssi.asStateFlow()
+
+    private val _hideStale = MutableStateFlow(false)
+    val hideStale: StateFlow<Boolean> = _hideStale.asStateFlow()
 
     private val _hasPermissions = MutableStateFlow(BluetoothPermissions.hasAll(context))
     val hasPermissions: StateFlow<Boolean> = _hasPermissions.asStateFlow()
@@ -75,13 +76,22 @@ class BluetoothFinderViewModel @Inject constructor(
             initialValue = 0,
         )
 
+    /** Jumlah perangkat yang **masih hidup** (sinyal terlihat dalam 15 dtk terakhir). */
+    val activeDevices: StateFlow<Int> = repository.devices
+        .map { list -> list.count { !it.isStaleAt(System.currentTimeMillis()) } }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = 0,
+        )
+
     /**
-     * Daftar perangkat hasil scan yang sudah difilter (nama/MAC + ambang RSSI)
-     * dan tetap terurut dari RSSI tertinggi.
+     * Daftar perangkat hasil scan yang sudah difilter (nama/MAC + ambang RSSI +
+     * sembunyikan hilang) dan tetap terurut dari RSSI tertinggi (hidup dulu).
      */
     val devices: StateFlow<List<BluetoothModel>> =
-        combine(repository.devices, _query, _minRssi) { list, query, minRssi ->
-            list.filteredBy(query, minRssi).map(BleDevice::toUiModel)
+        combine(repository.devices, _query, _minRssi, _hideStale) { list, query, minRssi, hideStale ->
+            list.filteredBy(query, minRssi, hideStale).map(BleDevice::toUiModel)
         }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -150,9 +160,14 @@ class BluetoothFinderViewModel @Inject constructor(
         _minRssi.value = value
     }
 
+    fun onHideStaleChange(value: Boolean) {
+        _hideStale.value = value
+    }
+
     fun clearFilters() {
         _query.value = ""
         _minRssi.value = NO_THRESHOLD
+        _hideStale.value = false
     }
 
     /** Deskripsi ringkas filter yang sedang aktif, mis. "≥ -80 dBm" atau "nama mengandung \"mi\"". */
@@ -160,11 +175,12 @@ class BluetoothFinderViewModel @Inject constructor(
         val parts = mutableListOf<String>()
         if (_query.value.isNotBlank()) parts += "pencarian \"${_query.value.trim()}\""
         if (_minRssi.value != NO_THRESHOLD) parts += "sinyal ≥ ${_minRssi.value} dBm"
+        if (_hideStale.value) parts += "yang hilang disembunyikan"
         return parts.joinToString(" • ")
     }
 
     fun hasActiveFilter(): Boolean =
-        _query.value.isNotBlank() || _minRssi.value != NO_THRESHOLD
+        _query.value.isNotBlank() || _minRssi.value != NO_THRESHOLD || _hideStale.value
 
     // ------------------------------------------------------------------ lifecycle
 
@@ -221,4 +237,5 @@ fun BleDevice.toUiModel(): BluetoothModel = BluetoothModel(
     smoothedRssiValue = smoothedRssi,
     distanceMeters = distanceMeters,
     lastSeen = lastSeen,
+    isStale = isStaleAt(System.currentTimeMillis()),
 )

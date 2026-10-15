@@ -43,7 +43,9 @@ import javax.inject.Singleton
  * - Izin belum diberikan / Bluetooth mati / adapter null -> event error + status spesifik.
  * - `startScan`/`stopScan` di-wrap terhadap SecurityException & IllegalStateException
  *   (kasus umum saat izin dicabut atau Bluetooth dimatikan di tengah jalan).
- * - Perangkat yang tidak terlihat lebih dari [STALE_MS] dikeluarkan dari daftar.
+ * - Perangkat yang tidak terlihat **tidak dibuang** dari daftar (retensi selama
+ *   sesi) — hanya entri yang sangat tua (> [HARD_EVICT_MS]) dibuang sebagai batas memori.
+ *   Status "hilang" dikelola oleh UI via [BleDevice.isStaleAt].
  *
  * Throttle tampilan: paket advertising yang datang sangat cepat ditampung di buffer
  * [deviceStates], lalu di-flush ke [_devices] (yang dibaca UI) setiap
@@ -113,7 +115,7 @@ class AndroidBleScanner @Inject constructor(
         override fun onScanFailed(errorCode: Int) {
             isScanning = false
             stopFlushTicker()
-            flushDeviceStates(pruneStale = false)
+            flushDeviceStates()
             _status.value = ScanStatus.IDLE
             emitError(scanFailedMessage(errorCode))
         }
@@ -188,7 +190,7 @@ class AndroidBleScanner @Inject constructor(
             // Bluetooth dimatikan di tengah jalan: scanner sudah null/tutup.
         }
         // Tampilkan hasil terakhir (maksimal [UI_REFRESH_INTERVAL_MS] paket lalu).
-        flushDeviceStates(pruneStale = false)
+        flushDeviceStates()
         _status.value = ScanStatus.IDLE
     }
 
@@ -298,7 +300,8 @@ class AndroidBleScanner @Inject constructor(
      * Ticker flush: memindahkan isi [deviceStates] ke [_devices] setiap
      * [UI_REFRESH_INTERVAL_MS] sehingga layar maksimal terbarui 1× per interval,
      * walau paket advertising datang jauh lebih cepat (~10× per detik pada LOW_LATENCY).
-     * Sekaligus membuang perangkat yang tidak terlihat lebih dari [STALE_MS].
+     * Perangkat yang hilang sinyal tetap dipertahankan (retensi sesi); hanya entri
+     * lebih tua dari [HARD_EVICT_MS] yang dibuang sebagai batas memori.
      */
     private fun startFlushTicker() {
         if (flushJob != null) return
@@ -306,7 +309,7 @@ class AndroidBleScanner @Inject constructor(
             while (isActive) {
                 delay(UI_REFRESH_INTERVAL_MS)
                 if (!isScanning) continue
-                flushDeviceStates(pruneStale = true)
+                flushDeviceStates()
             }
         }
     }
@@ -316,11 +319,11 @@ class AndroidBleScanner @Inject constructor(
         flushJob = null
     }
 
-    private fun flushDeviceStates(pruneStale: Boolean) {
-        if (pruneStale) {
-            val now = System.currentTimeMillis()
-            deviceStates.entries.removeAll { now - it.value.lastSeen >= STALE_MS }
-        }
+    private fun flushDeviceStates() {
+        // Retensi: jangan hapus entri walau sinyalnya hilang — cukup hard-evict
+        // entri yang sangat tua agar memori tetap terkendali.
+        val now = System.currentTimeMillis()
+        deviceStates.entries.removeAll { now - it.value.lastSeen >= HARD_EVICT_MS }
         _devices.value = deviceStates.toMap()
     }
 
@@ -477,8 +480,8 @@ class AndroidBleScanner @Inject constructor(
         /** Bobot RSSI terbaru pada perhitungan EMA. */
         const val SMOOTHING_ALPHA = 0.35f
 
-        /** Perangkat yang tidak terlihat selama ini dikeluarkan dari daftar. */
-        const val STALE_MS = 15_000L
+        /** Batas retensi memori: entri yang tidak terlihat selama ini dibuang total. */
+        const val HARD_EVICT_MS = 30 * 60_000L
 
         /**
          * Interval throttle tampilan live scan: UI maksimal dibarui 1× per detik,

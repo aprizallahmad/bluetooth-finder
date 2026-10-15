@@ -141,8 +141,8 @@ class RadarViewModel @Inject constructor(
 
     /**
      * Dipanggil saat layar pelacakan masuk ke STARTED.
-     * Penjeda scan saat aplikasi ke latar belakang ditangani repository
-     * (lifecycle aplikasi), sehingga berpindah layar tidak mematikan scan.
+     * Scan sepenuhnya dikendalikan pengguna (tombol Start/Stop); berpindah layar
+     * atau masuk latar belakang tidak pernah mematikan scan.
      */
     fun onUiStarted() {
         repository.refreshBluetoothState()

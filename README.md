@@ -15,8 +15,8 @@ lokal (Room) sehingga tidak hilang saat aplikasi ditutup.
 
 | # | Kebutuhan | Implementasi |
 |---|-----------|--------------|
-| 2.1 | Pemindaian perangkat | `AndroidBleScanner` memakai `BluetoothLeScanner` (mode *low latency*) dengan **throttle tampilan 1 detik per flush** agar data live tidak bergetar. Menampilkan **Nama**, **MAC Address/UUID**, **estimasi jarak**, dan **RSSI mentah (dBm)**. Tombol **Start/Scan** & **Stop** pada `BotBar`. |
-| 2.2 | Filter & pengurutan | Daftar selalu diurutkan otomatis dari **RSSI terkuat** (repository, EMA agar stabil). Search bar memfilter berdasarkan **nama** atau **MAC address**; chip filter membatasi **ambang minimum sinyal** (mis. hanya `≥ -80 dBm`, memakai RSSI mentah = angka di layar). |
+| 2.1 | Pemindaian perangkat | `AndroidBleScanner` memakai `BluetoothLeScanner` (mode *low latency*) dengan **throttle tampilan 1 detik per flush** agar data live tidak bergetar. Menampilkan **Nama**, **MAC Address/UUID**, **estimasi jarak**, dan **RSSI mentah (dBm)**. Tombol **Start/Scan** & **Stop** pada `BotBar`. Perangkat yang berhenti mengiklankan **tidak dihapus** — tetap tampil redup dengan "terakhir terlihat". |
+| 2.2 | Filter & pengurutan | Daftar selalu diurutkan otomatis dari **RSSI terkuat** (EMA agar stabil), **perangkat hidup di atas yang hilang**. Search bar memfilter berdasarkan **nama** atau **MAC address**; chip filter membatasi **ambang minimum sinyal** (mis. hanya `≥ -80 dBm`, memakai RSSI mentah = angka di layar) dan **opsi menyembunyikan perangkat hilang**. |
 | 2.3 | Pelacakan target / Radar | Tap satu perangkat → layar **Detail Pelacakan**: radar beranimasi, jarak & kategori berubah warna mengikuti tabel RSSI, plus kartu detail koneksi (RSSI raw/EMA, Tx Power, terakhir terdeteksi, status Live/Lost). Untuk perangkat tanpa nama (mis. HP), tersedia **pembacaan nama via koneksi GATT** (Device Name `0x2A00`). |
 | 2.4 | Penyimpanan lokal | Room (`device_history`): nama, alamat, waktu pertama & terakhir terlihat, RSSI terakhir, RSSI terkuat, jumlah deteksi. |
 | 3.1 | Screen 1: Dashboard (Scanner) | `HomeScreen` |
@@ -24,7 +24,7 @@ lokal (Room) sehingga tidak hilang saat aplikasi ditutup.
 | 3.3 | Screen 3: Riwayat Perangkat (History Log) | `HistoryScreen` |
 | 4.1 | Arsitektur MVVM + DI | `ui (Compose) → viewmodel → repository → data (BLE/Room)` + Hilt |
 | 4.2 | Error handling & resilience | Izin ditolak, Bluetooth mati, `scan failed`, kehilangan sinyal → banner/snackbar dengan aksi perbaikan |
-| 4.3 | App lifecycle | Scan dijeda saat ke latar belakang & dilanjutkan saat kembali; state scan hidup di singleton sehingga **rotasi layar tidak menghentikan scan** |
+| 4.3 | App lifecycle | Scan **hanya** dikendalikan tombol Start/Stop (tidak auto-pause di background, sesuai brief); state scan hidup di singleton sehingga **rotasi layar maupun pindah layar tidak menghentikan scan** |
 
 ### Pemetaan RSSI → Kategori → Perkiraan Jarak (sesuai brief)
 
@@ -80,7 +80,8 @@ bisa langsung di-install (`adb install -r ...`).
 
 1. **Scan** → tekan *Scan*; daftar perangkat muncul & terurut dari sinyal terkuat.
 2. **Stop** → daftar membeku (hasil terakhir tetap bisa dilihat).
-3. **Filter** → ketik nama/MAC pada kolom pencarian; pilih chip `≥ -80 dBm`.
+3. **Filter** → ketik nama/MAC pada kolom pencarian; pilih chip `≥ -80 dBm`; atau chip
+   **Sembunyikan hilang** untuk menyembunyikan perangkat yang sinyalnya putus.
 4. **Radar** → tap salah satu baris; radar menampilkan posisi target sesuai kategori
    sinyal. Mendekat/menjauh dari perangkat → warna, jarak, dan posisi titik berubah.
 5. **Kehilangan sinyal** → jauhkan perangkat (atau matikan Bluetooth) → status berubah
@@ -88,9 +89,12 @@ bisa langsung di-install (`adb install -r ...`).
 6. **Riwayat** → icon 🕘 di kanan atas layar utama; data tersimpan di Room dan bertahan
    setelah aplikasi ditutup. Ada tombol hapus dengan konfirmasi.
 7. **Rotasi layar** → pemindaian tetap berjalan.
-8. **Ke latar belakang** → pemindaian dijeda (hemat baterai) dan dilanjutkan otomatis
-   saat kembali.
-9. **Tolak izin / matikan Bluetooth** → banner peringatan muncul dengan tombol aksi.
+8. **Ke latar belakang** → pemindaian **tetap berjalan** sampai Anda menekan *Stop*
+   (sesuai brief). Catatan: di Android 8+, sistem boleh memperlambat hasil scan saat
+   layar mati — lihat bagian *Known Issues*.
+9. **Daftar tidak pernah kosong** → perangkat yang berhenti mengiklankan tetap tampil
+   redup ("Terakhir terlihat"); saat sinyalnya muncul lagi, baris otomatis nyala.
+10. **Tolak izin / matikan Bluetooth** → banner peringatan muncul dengan tombol aksi.
 
 ---
 
@@ -180,15 +184,20 @@ com.example.bluetoothfinder
    `Tanpa Nama` + opsi **"Baca nama"** yang membaca nama **langsung dari perangkat** via
    koneksi GATT (characteristic Device Name `0x2A00`) — hasilnya persis nama di
    Pengaturan -> Bluetooth perangkat (berlaku untuk HP yang tidak broadcast namanya).
-5. **Scanning dihentikan otomatis saat aplikasi ke latar belakang** (> 3 detik) — ini disengaja
-   (praktik hemat baterai & anjuran Android) dan **berlaku di level aplikasi**
-   (`ProcessLifecycleOwner`): berpindah layar (Scanner → Radar) **tidak** menghentikan scan,
-   hanya masuk/keluar aplikasi. Saat kembali ke depan, scan dilanjutkan otomatis.
-6. **Belum ada fitur koneksi/pairing/GATT** — sesuai brief yang hanya meminta pelacakan
+5. **Penghentian scan sepenuhnya di tangan pengguna** (tombol *Stop*) — sesuai brief yang
+   tidak meminta auto-stop. Tidak ada penjeda otomatis saat latar belakang. Konsekuensinya:
+   baterai lebih rakus bila ditinggal scan, dan **Android 8+ boleh memperlambat hasil scan
+   saat layar mati** (kebijakan sistem; tidak bisa dipaksa tanpa foreground service).
+   Untuk HP dengan layar selalu menyala + aplikasi di depan, ini tidak berpengaruh.
+6. **Daftar perangkat di-retensi selama sesi** — perangkat yang berhenti mengiklankan tidak
+   dihapus, hanya ditandai "hilang" (dirender redup + "Terakhir terlihat"), dan kembali
+   aktif otomatis saat paket masuk. Baris hanya dibuang bila tidak terlihat > 30 menit
+   (batas memori).
+7. **Belum ada fitur koneksi/pairing/GATT** — sesuai brief yang hanya meminta pelacakan
    berbasis *advertising* RSSI.
-7. **Android 14+ membatasi hardware scan slot**; pada pemakaian sangat agresif sistem dapat
+8. **Android 14+ membatasi hardware scan slot**; pada pemakaian sangat agresif sistem dapat
    memblock scan (error code 2/5 ditangani dan ditampilkan sebagai snackbar).
-8. **Belum ada instrumented test UI/E2E** (unit test logika kategori RSSI & filter/pengurutan)
+9. **Belum ada instrumented test UI/E2E** (unit test logika kategori RSSI & filter/pengurutan)
    karena keterbatasan waktu 48 jam dan ketergantungan pada perangkat fisik.
 
 ---
@@ -206,8 +215,11 @@ com.example.bluetoothfinder
   *"Could not find compile target android-37"*. Dengan compileSdk 36, project terbuka
   bersih di Android Studio mana pun (36 didukung resmi AGP 9) dan tidak ada kode
   yang memakai API di atas 36.
-- **Asumsi: scan di-pause, bukan dibuang**, saat background — agar pengguna tidak
-  kehilangan daftar hasil ketika kembali.
+- **Asumsi: scan sepenuhnya dikendalikan pengguna** (Start/Stop) tanpa jeda otomatis di
+  background — mengikuti brief; lihat *Known Issues* #5 untuk konsekuensi baterai & OS throttle.
+- **Asumsi: daftar hasil di-retensi selama sesi** — perangkat hilang sinyal tidak dihapus,
+  hanya ditandai redup ("Terakhir terlihat"); pemangkasan hanya untuk entri > 30 menit
+  sebagai batas memori.
 - **Asumsi: pengurutan memakai RSSI yang sudah dihaluskan (EMA α=0.35)** agar urutan tidak
   "loncat-loncat"; nilai **RSSI mentah tetap ditampilkan** sesuai brief, dan filter ambang
   juga memakai nilai mentah (angka di layar = angka yang difilter); warna indikator memakai EMA.

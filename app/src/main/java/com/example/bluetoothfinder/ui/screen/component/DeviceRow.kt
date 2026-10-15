@@ -1,5 +1,6 @@
 package com.example.bluetoothfinder.ui.screen.component
 
+import android.text.format.DateUtils
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,6 +20,10 @@ import com.example.bluetoothfinder.ui.theme.signalColor
  * Nama + MAC Address | RSSI mentah (dBm) | Estimasi jarak + kategori sinyal.
  *
  * Garis tabel digambar sekali pada baris ([deviceTableGrid]) agar lurus dan tidak ganda.
+ *
+ * Perangkat **hilang sinyal** ([BluetoothModel.isStale]) tetap ditampilkan (retensi sesi)
+ * tapi dirender redup dan kolom jarak diganti "Terakhir terlihat: ... lalu". Saat paket
+ * advertising kembali masuk, baris otomatis nyala lagi.
  */
 @Composable
 fun DeviceRow(
@@ -29,6 +34,15 @@ fun DeviceRow(
     // Warna mengikuti RSSI halus (EMA) agar indikator tidak berkedip tiap paket.
     val deviceSignalColor = signalColor(device.indicatorRssi)
     val colorScheme = MaterialTheme.colorScheme
+
+    // Baris hilang: sinyal & teks dibuat redup (alpha rendah) sebagai penanda visual.
+    val stale = device.isStale
+    val signalColor = if (stale) deviceSignalColor.copy(alpha = 0.35f) else deviceSignalColor
+    val nameColor = if (stale) {
+        colorScheme.onSurface.copy(alpha = 0.45f)
+    } else {
+        colorScheme.onSurface
+    }
 
     Row(
         modifier = modifier
@@ -43,13 +57,16 @@ fun DeviceRow(
                     text = device.name,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
+                    color = nameColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = device.macAddress,
                     style = MaterialTheme.typography.bodySmall,
-                    color = colorScheme.onSurfaceVariant,
+                    color = colorScheme.onSurfaceVariant.copy(
+                        alpha = if (stale) 0.45f else colorScheme.onSurfaceVariant.alpha,
+                    ),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -64,7 +81,7 @@ fun DeviceRow(
                 text = device.rssi,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = deviceSignalColor,
+                color = signalColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -74,22 +91,42 @@ fun DeviceRow(
             modifier = Modifier.weight(DeviceTableWeights[2]),
             contentAlignment = Alignment.Center,
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = device.distance,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Medium,
-                    color = deviceSignalColor,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = device.signalCategory,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            if (stale) {
+                // Kolom jarak tidak relevan saat hilang -> tampilkan terakhir terlihat.
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = DateUtils.getRelativeTimeSpanString(device.lastSeen).toString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = "Sinyal hilang",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            } else {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = device.distance,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium,
+                        color = signalColor,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = device.signalCategory,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }

@@ -82,12 +82,15 @@ fun HomeScreen(
     val hasPermissions by viewModel.hasPermissions.collectAsStateWithLifecycle()
     val query by viewModel.query.collectAsStateWithLifecycle()
     val minRssi by viewModel.minRssi.collectAsStateWithLifecycle()
+    val hideStale by viewModel.hideStale.collectAsStateWithLifecycle()
     val totalDevices by viewModel.totalDevices.collectAsStateWithLifecycle()
+    val activeDevices by viewModel.activeDevices.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
     val isScanning = scanStatus == ScanStatus.SCANNING
 
-    // ---- App lifecycle: jeda scan saat ke latar belakang, lanjutkan saat kembali.
+    // ---- App lifecycle: hanya untuk sinkronisasi status izin/Bluetooth (scan tidak
+    // pernah auto-pause di background — dikendalikan penuh oleh tombol Start/Stop).
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(viewModel) {
         // Sinkronisasi awal (observer baru menerima event berikutnya saja).
@@ -201,13 +204,18 @@ fun HomeScreen(
             FilterBar(
                 query = query,
                 minRssi = minRssi,
+                hideStale = hideStale,
                 onQueryChange = viewModel::onQueryChange,
                 onMinRssiChange = viewModel::onMinRssiChange,
+                onHideStaleChange = viewModel::onHideStaleChange,
                 modifier = Modifier.padding(top = 12.dp),
             )
 
             // Indikator filter: jumlah yang tampil vs total, agar efek filter langsung terlihat.
-            val hasFilter = query.isNotBlank() || minRssi != BluetoothFinderViewModel.NO_THRESHOLD
+            val hasFilter =
+                query.isNotBlank() ||
+                    minRssi != BluetoothFinderViewModel.NO_THRESHOLD ||
+                    hideStale
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -217,6 +225,9 @@ fun HomeScreen(
                 Text(
                     text = buildString {
                         append("Menampilkan ${devices.size} dari $totalDevices perangkat")
+                        val lost = totalDevices - activeDevices
+                        if (lost > 0) append(" (").append(activeDevices).append(" aktif • ")
+                            .append(lost).append(" hilang)")
                         if (hasFilter) append(" • ").append(viewModel.activeFilterDescription())
                     },
                     style = MaterialTheme.typography.labelSmall,

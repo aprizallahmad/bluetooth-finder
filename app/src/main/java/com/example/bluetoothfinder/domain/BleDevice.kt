@@ -28,7 +28,17 @@ data class BleDevice(
     /** Rentang jarak (string) sesuai brief. */
     val distanceLabel: String get() = category.distanceLabel
 
+    /**
+     * True bila perangkat belum terlihat selama [STALE_AFTER_MS] pada waktu [now].
+     * Perangkat hilang **tetap ditampilkan** di daftar (retensi sesi) — hanya
+     * ditandai "redup" dengan keterangan terakhir terlihat.
+     */
+    fun isStaleAt(now: Long): Boolean = now - lastSeen >= STALE_AFTER_MS
+
     companion object {
         const val UNKNOWN_NAME = "Tanpa Nama"
+
+        /** Perangkat dianggap hilang/redup bila tidak terlihat selama ini. */
+        const val STALE_AFTER_MS = 15_000L
     }
 }

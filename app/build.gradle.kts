@@ -57,7 +57,6 @@ dependencies {
     // Lifecycle (state collection + ViewModel in Compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
-    implementation(libs.androidx.lifecycle.process)
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)

@@ -12,17 +12,20 @@ import org.junit.Test
  */
 class DeviceFilterTest {
 
+    private val now = System.currentTimeMillis()
+
     private fun device(
         name: String,
         address: String,
         rssi: Int,
+        lastSeen: Long = now,
     ): BleDevice = BleDevice(
         address = address,
         name = name,
         rssi = rssi,
         smoothedRssi = rssi,
         txPower = null,
-        lastSeen = 0L,
+        lastSeen = lastSeen,
         seenCount = 1,
     )
 
@@ -35,7 +38,7 @@ class DeviceFilterTest {
 
     @Test
     fun `diurutkan dari sinyal terkuat - rssi tertinggi`() {
-        val sorted = devices.sortedBySignal()
+        val sorted = devices.sortedBySignal(now)
         assertEquals(listOf(-48, -62, -71, -85), sorted.map { it.rssi })
     }
 
@@ -91,13 +94,14 @@ class DeviceFilterTest {
         address: String,
         rssi: Int,
         ema: Int,
+        lastSeen: Long = now,
     ): BleDevice = BleDevice(
         address = address,
         name = name,
         rssi = rssi,
         smoothedRssi = ema,
         txPower = null,
-        lastSeen = 0L,
+        lastSeen = lastSeen,
         seenCount = 1,
     )
 
@@ -107,7 +111,7 @@ class DeviceFilterTest {
         val a = deviceWithEma(name = "Perangkat A", address = "AA:01", rssi = -50, ema = -75)
         val b = deviceWithEma(name = "Perangkat B", address = "AA:02", rssi = -70, ema = -60)
 
-        val sorted = listOf(a, b).sortedBySignal()
+        val sorted = listOf(a, b).sortedBySignal(now)
 
         assertEquals(listOf("Perangkat B", "Perangkat A"), sorted.map { it.name })
     }
@@ -122,5 +126,77 @@ class DeviceFilterTest {
         assertEquals(1, filtered.size)
         // Angka yang ditampilkan di layar = nilai mentah yang dipakai filter.
         assertEquals(-65, filtered.first().rssi)
+    }
+
+    // ------------------------------------------------- retensi: hidup vs hilang
+
+    private fun deviceAt(
+        name: String,
+        address: String,
+        rssi: Int,
+        lastSeen: Long,
+    ): BleDevice = BleDevice(
+        address = address,
+        name = name,
+        rssi = rssi,
+        smoothedRssi = rssi,
+        txPower = null,
+        lastSeen = lastSeen,
+        seenCount = 1,
+    )
+
+    @Test
+    fun `perangkat yang masih hidup selalu di atas yang hilang`() {
+        // Perangkat hilang (lastSeen jauh di masa lalu) walau sinyalnya kuat.
+        val hilangKuat = deviceAt("Hilang Kuat", "AA:10", rssi = -40, lastSeen = now - 60_000)
+        val hidupLemah = deviceAt("Hidup Lemah", "AA:11", rssi = -85, lastSeen = now)
+
+        val sorted = listOf(hilangKuat, hidupLemah).sortedBySignal(now = now)
+
+        assertEquals(listOf("Hidup Lemah", "Hilang Kuat"), sorted.map { it.name })
+    }
+
+    @Test
+    fun `perangkat hilang diurut dari yang terakhir terlihat paling baru`() {
+        val hilangLama = deviceAt("Hilang Lama", "AA:12", rssi = -70, lastSeen = now - 300_000)
+        val hilangBaru = deviceAt("Hilang Baru", "AA:13", rssi = -70, lastSeen = now - 16_000)
+
+        val sorted = listOf(hilangLama, hilangBaru).sortedBySignal(now = now)
+
+        assertEquals(listOf("Hilang Baru", "Hilang Lama"), sorted.map { it.name })
+    }
+
+    @Test
+    fun `perangkat hidup tetap terlihat lama setelah berhenti mengiklankan`() {
+        // Retensi: perangkat tidak dihapus dari daftar walau tidak terlihat >15 dtk —
+        // hanya ditandai hilang (isStaleAt), sehingga baris tetap ada (redup).
+        val terakhirTerlihat = now - 45_000
+        val perangkat = deviceAt("POCO X3", "AA:14", rssi = -60, lastSeen = terakhirTerlihat)
+
+        assertTrue(perangkat.isStaleAt(now))
+        // Tidak ada pemangkasan di level domain: entri tetap ada dalam daftar.
+        val list = listOf(perangkat).filteredBy(query = "", minRssi = NO_RSSI_THRESHOLD, now = now)
+        assertEquals(1, list.size)
+    }
+
+    @Test
+    fun `filter hideStale menyembunyikan hanya perangkat hilang`() {
+        val hidup = deviceAt("Hidup", "AA:15", rssi = -50, lastSeen = now)
+        val hilang = deviceAt("Hilang", "AA:16", rssi = -50, lastSeen = now - 16_000)
+        val semua = listOf(hidup, hilang)
+
+        val tanpaSembunyi = semua.filteredBy("", NO_RSSI_THRESHOLD, hideStale = false, now = now)
+        assertEquals(2, tanpaSembunyi.size)
+
+        val disembunyikan = semua.filteredBy("", NO_RSSI_THRESHOLD, hideStale = true, now = now)
+        assertEquals(listOf("Hidup"), disembunyikan.map { it.name })
+    }
+
+    @Test
+    fun `isStaleAt false tepat di bawah ambang dan true saat tepat ambang`() {
+        val perangkat = deviceAt("Dekat Batas", "AA:17", rssi = -60, lastSeen = now)
+
+        assertTrue(!perangkat.isStaleAt(now + BleDevice.STALE_AFTER_MS - 1))
+        assertTrue(perangkat.isStaleAt(now + BleDevice.STALE_AFTER_MS))
     }
 }
