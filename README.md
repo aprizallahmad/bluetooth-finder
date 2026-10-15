@@ -259,4 +259,32 @@ com.example.bluetoothfinder
   (case-insensitive), dan filter ambang sinyal yang memakai nilai RSSI mentah.
 - `RadarViewModelTest` — alur pembacaan nama via GATT (otomatis saat target tanpa nama,
   status loading/gagal, dan percobaan ulang).
-```
+
+---
+
+## 10. Pernyataan Orisinalitas & Penggunaan Alat Bantu (AI)
+
+Saya menyatakan bahwa proyek ini dikerjakan secara mandiri sebagai bagian dari study case
+yang diberikan. Selama pengerjaan saya **menggunakan bantuan alat generatif AI** (asisten
+kode berbasis LLM yang dijalankan lewat agen CLI **OpenCode**, model **MiMo-V2.6**), dengan
+rincian sebagai berikut.
+
+### Bagian yang dibantu AI
+
+- Penulisan dan penyusunan kode sumber (Kotlin, Jetpack Compose, Hilt, Room, Coroutines):
+  arsitektur MVVM, scanner BLE, persistence, hingga ketiga layar.
+- Penulisan unit test (`SignalCategoryTest`, `DeviceFilterTest`, `RadarViewModelTest`).
+- Penulisan dokumentasi README ini.
+- Diagnosa & perbaikan masalah build (compatibilitas KSP / AGP 9 built-in Kotlin / Room 2.7.1)
+  serta penurunan compileSdk ke 36 agar kompatibel dengan Android Studio.
+- Saran praktik terbaik lifecycle, error handling, dan penskalaan data (throttle flush,
+  EMA smoothing, retensi daftar).
+
+### Peran saya (manusia)
+
+- Menentukan kebutuhan dan mengambil seluruh keputusan desain: memilih Kotlin + Jetpack
+  Compose, menolak mode *hybrid scan* klasik-BLE, memilih retensi daftar, dsb.
+- Menguji langsung di perangkat fisik (POCO X3 NFC, Infinix NOTE 12) dan melaporkan
+  hasil pengujian sebagai bahan iterasi.
+- Review, penyesuaian, dan verifikasi setiap perubahan kode sebelum commit.
+- Mengelola repository, commit history, dan artefak submission (APK).
