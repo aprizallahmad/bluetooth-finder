@@ -117,7 +117,13 @@ fun BluetoothFinderTheme(
         LocalTextSelectionColors provides selectionColors
 
     ) {
-        ProvideTextStyle(value = typography.bodyLarge, content = content)
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = typography,
+            content = {
+                ProvideTextStyle(value = typography.bodyLarge, content = content)
+            },
+        )
     }
 }
 

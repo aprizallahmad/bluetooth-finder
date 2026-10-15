@@ -13,3 +13,6 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Build artifact submission (APK), build ulang dengan ./gradlew :app:assembleDebug
+/artifacts/
