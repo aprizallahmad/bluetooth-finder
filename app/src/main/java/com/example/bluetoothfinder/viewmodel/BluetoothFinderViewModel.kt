@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.bluetoothfinder.data.ble.ScanStatus
 import com.example.bluetoothfinder.data.repository.DeviceRepository
 import com.example.bluetoothfinder.domain.BleDevice
+import com.example.bluetoothfinder.domain.NO_RSSI_THRESHOLD
+import com.example.bluetoothfinder.domain.filteredBy
 import com.example.bluetoothfinder.model.BluetoothModel
 import com.example.bluetoothfinder.util.BluetoothPermissions
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -20,6 +22,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -33,7 +36,11 @@ import javax.inject.Inject
  * - filter pencarian (nama / MAC) & ambang batas minimum RSSI,
  * - pengurutan otomatis RSSI tertinggi (dilakukan repository),
  * - error handling izin, Bluetooth mati, dan kegagalan scan,
- * - lifecycle aplikasi: scan dijeda saat ke latar belakang & dilanjutkan saat kembali.
+ * - polling status Bluetooth selama layar terlihat.
+ *
+ * Catatan lifecycle: penjeda scan saat aplikasi ke latar belakang ditangani oleh
+ * repository (berbasis `ProcessLifecycleOwner`), **bukan** lifecycle layar ini,
+ * sehingga berpindah layar (Scanner -> Radar) tidak pernah menghentikan scan.
  */
 @HiltViewModel
 class BluetoothFinderViewModel @Inject constructor(
@@ -59,14 +66,22 @@ class BluetoothFinderViewModel @Inject constructor(
     )
     val events: SharedFlow<String> = _events.asSharedFlow()
 
-    /** Daftar perangkat hasil scan yang sudah difilter + diurutkan RSSI tertinggi. */
+    /** Jumlah total perangkat hasil scan (sebelum difilter) — untuk indikator filter. */
+    val totalDevices: StateFlow<Int> = repository.devices
+        .map { it.size }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = 0,
+        )
+
+    /**
+     * Daftar perangkat hasil scan yang sudah difilter (nama/MAC + ambang RSSI)
+     * dan tetap terurut dari RSSI tertinggi.
+     */
     val devices: StateFlow<List<BluetoothModel>> =
         combine(repository.devices, _query, _minRssi) { list, query, minRssi ->
-            list.asSequence()
-                .filter { it.matches(query) }
-                .filter { it.smoothedRssi >= minRssi }
-                .map(BleDevice::toUiModel)
-                .toList()
+            list.filteredBy(query, minRssi).map(BleDevice::toUiModel)
         }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -75,14 +90,10 @@ class BluetoothFinderViewModel @Inject constructor(
 
     val isScanning: Boolean get() = scanStatus.value == ScanStatus.SCANNING
 
-    /** True bila pengguna menginginkan scan aktif (dipakai untuk resume otomatis). */
+    /** True bila pengguna menginginkan scan aktif (dipakai saat izin/bluetooth pulih). */
     private var userWantsScan = false
 
-    /** True bila scan dijeda otomatis karena aplikasi masuk latar belakang. */
-    private var pausedByBackground = false
-
     private var pollJob: Job? = null
-    private var pauseJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -103,14 +114,12 @@ class BluetoothFinderViewModel @Inject constructor(
             return
         }
         userWantsScan = true
-        pausedByBackground = false
         repository.refreshBluetoothState()
         repository.startScan()
     }
 
     fun stopScan() {
         userWantsScan = false
-        pausedByBackground = false
         repository.stopScan()
     }
 
@@ -146,33 +155,28 @@ class BluetoothFinderViewModel @Inject constructor(
         _minRssi.value = NO_THRESHOLD
     }
 
+    /** Deskripsi ringkas filter yang sedang aktif, mis. "≥ -80 dBm" atau "nama mengandung \"mi\"". */
+    fun activeFilterDescription(): String {
+        val parts = mutableListOf<String>()
+        if (_query.value.isNotBlank()) parts += "pencarian \"${_query.value.trim()}\""
+        if (_minRssi.value != NO_THRESHOLD) parts += "sinyal ≥ ${_minRssi.value} dBm"
+        return parts.joinToString(" • ")
+    }
+
+    fun hasActiveFilter(): Boolean =
+        _query.value.isNotBlank() || _minRssi.value != NO_THRESHOLD
+
     // ------------------------------------------------------------------ lifecycle
 
     /** Dipanggil saat layar masuk ke STARTED (termasuk setelah rotasi). */
     fun onUiStarted() {
-        pauseJob?.cancel()
-        pauseJob = null
         refreshPermissions()
         startPolling()
-        if (pausedByBackground && userWantsScan) {
-            pausedByBackground = false
-            repository.startScan()
-        }
     }
 
-    /** Dipanggil saat layar keluar dari STARTED (latar belakang / rotasi). */
+    /** Dipanggil saat layar keluar dari STARTED (ke latar belakang / berpindah layar). */
     fun onUiStopped() {
         stopPolling()
-        // Beri waktu beberapa detik: bila ini hanya rotasi layar, onUiStarted()
-        // akan membatalkan penjadwalan sehingga scan tidak pernah berhenti.
-        pauseJob?.cancel()
-        pauseJob = viewModelScope.launch {
-            delay(BACKGROUND_PAUSE_DELAY_MS)
-            if (isScanning) {
-                pausedByBackground = true
-                repository.stopScan()
-            }
-        }
     }
 
     private fun startPolling() {
@@ -195,20 +199,11 @@ class BluetoothFinderViewModel @Inject constructor(
         super.onCleared()
     }
 
-    // ------------------------------------------------------------------ helpers
-
-    private fun BleDevice.matches(query: String): Boolean {
-        if (query.isBlank()) return true
-        return name.contains(query, ignoreCase = true) ||
-            address.contains(query, ignoreCase = true)
-    }
-
     companion object {
-        /** Ambang RSSI "tanpa filter". */
-        const val NO_THRESHOLD = -200
+        /** Ambang RSSI "tanpa filter" (Semua sinyal). */
+        const val NO_THRESHOLD = NO_RSSI_THRESHOLD
 
         private const val BLUETOOTH_POLL_INTERVAL_MS = 1_500L
-        private const val BACKGROUND_PAUSE_DELAY_MS = 3_000L
     }
 }
 
@@ -217,9 +212,13 @@ fun BleDevice.toUiModel(): BluetoothModel = BluetoothModel(
     name = name,
     macAddress = address,
     distance = distanceLabel,
+    // Kolom RSSI menampilkan nilai MENTAH sesuai brief.
     rssi = "$rssi dBm",
+    rssiValue = rssi,
+    // Warna indikator, kategori & estimasi jarak memakai EMA agar tidak berkedip.
     signalCategory = category.label,
-    rssiValue = smoothedRssi,
+    indicatorRssi = smoothedRssi,
+    smoothedRssiValue = smoothedRssi,
     distanceMeters = distanceMeters,
     lastSeen = lastSeen,
 )

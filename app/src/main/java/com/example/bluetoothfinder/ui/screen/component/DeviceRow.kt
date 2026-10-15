@@ -11,13 +11,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import com.example.bluetoothfinder.model.BluetoothModel
 import com.example.bluetoothfinder.ui.theme.signalColor
 
 /**
  * Satu baris pada daftar perangkat:
  * Nama + MAC Address | RSSI mentah (dBm) | Estimasi jarak + kategori sinyal.
+ *
+ * Garis tabel digambar sekali pada baris ([deviceTableGrid]) agar lurus dan tidak ganda.
  */
 @Composable
 fun DeviceRow(
@@ -25,15 +26,18 @@ fun DeviceRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val signalColor = signalColor(device.rssiValue)
+    // Warna mengikuti RSSI halus (EMA) agar indikator tidak berkedip tiap paket.
+    val deviceSignalColor = signalColor(device.indicatorRssi)
     val colorScheme = MaterialTheme.colorScheme
 
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .deviceTableGrid()
             .clickable(onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        BorderedCell(modifier = Modifier.weight(1.4f)) {
+        TableCell(modifier = Modifier.weight(DeviceTableWeights[0])) {
             Column {
                 Text(
                     text = device.name,
@@ -52,22 +56,22 @@ fun DeviceRow(
             }
         }
 
-        BorderedCell(
-            modifier = Modifier.weight(0.8f),
+        TableCell(
+            modifier = Modifier.weight(DeviceTableWeights[1]),
             contentAlignment = Alignment.Center,
         ) {
             Text(
                 text = device.rssi,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = signalColor,
+                color = deviceSignalColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
 
-        BorderedCell(
-            modifier = Modifier.weight(1.2f),
+        TableCell(
+            modifier = Modifier.weight(DeviceTableWeights[2]),
             contentAlignment = Alignment.Center,
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -75,7 +79,7 @@ fun DeviceRow(
                     text = device.distance,
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.Medium,
-                    color = signalColor,
+                    color = deviceSignalColor,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )

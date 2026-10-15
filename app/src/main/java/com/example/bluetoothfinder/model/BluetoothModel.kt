@@ -4,7 +4,11 @@ package com.example.bluetoothfinder.model
  * Model presentation untuk daftar perangkat pada layar scanner.
  *
  * @property rssi nilai RSSI mentah (raw dBm) dalam format tampilan, contoh: "-62 dBm".
- * @property rssiValue nilai RSSI numerik (sudah dihaluskan) untuk kebutuhan filter.
+ *   Sesuai brief, kolom daftar menampilkan **nilai mentah**.
+ * @property rssiValue RSSI mentah (numerik) — dipakai filter ambang sinyal agar
+ *   angka yang dilihat pengguna = angka yang difilter.
+ * @property indicatorRssi RSSI hasil EMA (halus) — dipakai untuk **warna indikator**
+ *   agar warna/kategori tidak berkedip tiap paket.
  */
 data class BluetoothModel(
     val id: Int,
@@ -14,6 +18,8 @@ data class BluetoothModel(
     val rssi: String,
     val signalCategory: String = "",
     val rssiValue: Int = 0,
+    val indicatorRssi: Int = 0,
+    val smoothedRssiValue: Int = 0,
     val distanceMeters: Double = 0.0,
     val lastSeen: Long = 0L,
 )

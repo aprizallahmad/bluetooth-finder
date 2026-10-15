@@ -6,6 +6,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -27,6 +29,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -79,6 +82,7 @@ fun HomeScreen(
     val hasPermissions by viewModel.hasPermissions.collectAsStateWithLifecycle()
     val query by viewModel.query.collectAsStateWithLifecycle()
     val minRssi by viewModel.minRssi.collectAsStateWithLifecycle()
+    val totalDevices by viewModel.totalDevices.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
     val isScanning = scanStatus == ScanStatus.SCANNING
@@ -202,12 +206,36 @@ fun HomeScreen(
                 modifier = Modifier.padding(top = 12.dp),
             )
 
+            // Indikator filter: jumlah yang tampil vs total, agar efek filter langsung terlihat.
+            val hasFilter = query.isNotBlank() || minRssi != BluetoothFinderViewModel.NO_THRESHOLD
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = buildString {
+                        append("Menampilkan ${devices.size} dari $totalDevices perangkat")
+                        if (hasFilter) append(" • ").append(viewModel.activeFilterDescription())
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                if (hasFilter) {
+                    TextButton(onClick = { viewModel.clearFilters() }) {
+                        Text("Reset filter", fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+
             if (devices.isEmpty()) {
                 EmptyScanState(
                     hasPermissions = hasPermissions,
                     bluetoothOn = bluetoothOn,
                     isScanning = isScanning,
-                    filtered = query.isNotBlank() || minRssi != BluetoothFinderViewModel.NO_THRESHOLD,
+                    filtered = hasFilter,
                     onClearFilters = viewModel::clearFilters,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -219,6 +247,7 @@ fun HomeScreen(
                         .fillMaxWidth()
                         .weight(1f)
                         .padding(top = 12.dp),
+                    contentPadding = PaddingValues(bottom = 16.dp),
                 ) {
                     item(key = "header") { HeaderData() }
                     items(devices, key = { it.macAddress }) { device ->
@@ -227,17 +256,6 @@ fun HomeScreen(
                             onClick = {
                                 navController.navigate("detail/${Uri.encode(device.macAddress)}")
                             },
-                        )
-                    }
-                    item(key = "footer") {
-                        Text(
-                            text = "${devices.size} perangkat ditampilkan (urut RSSI terkuat)",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 12.dp),
                         )
                     }
                 }
@@ -288,7 +306,7 @@ private fun EmptyScanState(
                 textAlign = TextAlign.Center,
             )
             if (filtered) {
-                androidx.compose.material3.TextButton(onClick = onClearFilters) {
+                TextButton(onClick = onClearFilters) {
                     Text("Bersihkan filter", fontWeight = FontWeight.SemiBold)
                 }
             }

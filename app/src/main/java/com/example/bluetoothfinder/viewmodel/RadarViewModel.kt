@@ -78,8 +78,6 @@ class RadarViewModel @Inject constructor(
 
     private var autoStarted = false
     private var pollJob: Job? = null
-    private var pauseJob: Job? = null
-    private var pausedByBackground = false
 
     init {
         if (repository.scanStatus.value != ScanStatus.SCANNING) {
@@ -91,29 +89,19 @@ class RadarViewModel @Inject constructor(
         }
     }
 
-    /** Dipanggil saat layar pelacakan masuk ke STARTED. */
+    /**
+     * Dipanggil saat layar pelacakan masuk ke STARTED.
+     * Penjeda scan saat aplikasi ke latar belakang ditangani repository
+     * (lifecycle aplikasi), sehingga berpindah layar tidak mematikan scan.
+     */
     fun onUiStarted() {
-        pauseJob?.cancel()
-        pauseJob = null
         repository.refreshBluetoothState()
-        if (pausedByBackground) {
-            pausedByBackground = false
-            repository.startScan()
-        }
         startTicker()
     }
 
-    /** Dipanggil saat layar pelacakan keluar dari STARTED. */
+    /** Dipanggil saat layar pelacakan keluar dari STARTED (pindah layar / background). */
     fun onUiStopped() {
         stopTicker()
-        pauseJob?.cancel()
-        pauseJob = viewModelScope.launch {
-            delay(BACKGROUND_PAUSE_DELAY_MS)
-            if (scanStatus.value == ScanStatus.SCANNING) {
-                pausedByBackground = true
-                repository.stopScan()
-            }
-        }
     }
 
     fun startTracking() {
@@ -163,6 +151,5 @@ class RadarViewModel @Inject constructor(
         const val ARG_ADDRESS = "address"
         private const val TICK_INTERVAL_MS = 1_000L
         private const val LOST_TIMEOUT_MS = 8_000L
-        private const val BACKGROUND_PAUSE_DELAY_MS = 3_000L
     }
 }

@@ -37,6 +37,10 @@ import javax.inject.Singleton
  * - `startScan`/`stopScan` di-wrap terhadap SecurityException & IllegalStateException
  *   (kasus umum saat izin dicabut atau Bluetooth dimatikan di tengah jalan).
  * - Perangkat yang tidak terlihat lebih dari [STALE_MS] dikeluarkan dari daftar.
+ *
+ * Throttle tampilan: paket advertising yang datang sangat cepat ditampung di buffer
+ * [deviceStates], lalu di-flush ke [_devices] (yang dibaca UI) setiap
+ * [UI_REFRESH_INTERVAL_MS] agar data live scanning tidak bergetar terlalu cepat.
  */
 @Singleton
 @SuppressLint("MissingPermission")
@@ -54,6 +58,19 @@ class AndroidBleScanner @Inject constructor(
     private val _devices = MutableStateFlow<Map<String, BleDevice>>(emptyMap())
     override val devices: StateFlow<Map<String, BleDevice>> = _devices.asStateFlow()
 
+    /**
+     * State perangkat yang diperbarui setiap paket advertising masuk (cepat),
+     * sedangkan [_devices] (yang dibaca UI) hanya di-flush dari sini secara berkala
+     * setiap [UI_REFRESH_INTERVAL_MS] agar tampilan tidak bergetar.
+     */
+    private val deviceStates = mutableMapOf<String, BleDevice>()
+
+    /** Cache nama perangkat dari berbagai sumber (advertising/bonded) agar tidak hilang. */
+    private val knownNames = mutableMapOf<String, String>()
+
+    /** Nama perangkat yang sudah di-bond/pair (dibaca sekali saat scan dimulai). */
+    private var bondedNames: Map<String, String> = emptyMap()
+
     private val _status = MutableStateFlow(ScanStatus.IDLE)
     override val status: StateFlow<ScanStatus> = _status.asStateFlow()
 
@@ -67,7 +84,7 @@ class AndroidBleScanner @Inject constructor(
     )
     override val errors: SharedFlow<String> = _errors.asSharedFlow()
 
-    private var prunerJob: Job? = null
+    private var flushJob: Job? = null
     private var isScanning = false
 
     private val scanCallback = object : ScanCallback() {
@@ -81,8 +98,8 @@ class AndroidBleScanner @Inject constructor(
 
         override fun onScanFailed(errorCode: Int) {
             isScanning = false
-            prunerJob?.cancel()
-            prunerJob = null
+            stopFlushTicker()
+            flushDeviceStates(pruneStale = false)
             _status.value = ScanStatus.IDLE
             emitError(scanFailedMessage(errorCode))
         }
@@ -102,6 +119,9 @@ class AndroidBleScanner @Inject constructor(
             emitError("Izin Bluetooth belum diberikan. Izinkan akses untuk memindai perangkat.")
             return
         }
+
+        // Muat nama perangkat yang sudah pernah di-bond/pair (butuh BLUETOOTH_CONNECT).
+        refreshBondedNames()
 
         refreshBluetoothState()
         if (!_bluetoothOn.value) {
@@ -139,14 +159,13 @@ class AndroidBleScanner @Inject constructor(
 
         isScanning = true
         _status.value = ScanStatus.SCANNING
-        startPruner()
+        startFlushTicker()
     }
 
     override fun stopScan() {
         if (!isScanning) return
         isScanning = false
-        prunerJob?.cancel()
-        prunerJob = null
+        stopFlushTicker()
         try {
             adapter?.bluetoothLeScanner?.stopScan(scanCallback)
         } catch (se: SecurityException) {
@@ -154,6 +173,8 @@ class AndroidBleScanner @Inject constructor(
         } catch (ise: IllegalStateException) {
             // Bluetooth dimatikan di tengah jalan: scanner sudah null/tutup.
         }
+        // Tampilkan hasil terakhir (maksimal [UI_REFRESH_INTERVAL_MS] paket lalu).
+        flushDeviceStates(pruneStale = false)
         _status.value = ScanStatus.IDLE
     }
 
@@ -168,8 +189,6 @@ class AndroidBleScanner @Inject constructor(
             stopScan()
             _status.value = ScanStatus.BLUETOOTH_OFF
             emitError("Bluetooth dimatikan. Pemindaian dihentikan.")
-        } else if (!enabled && _status.value == ScanStatus.SCANNING) {
-            _status.value = ScanStatus.BLUETOOTH_OFF
         }
     }
 
@@ -179,7 +198,8 @@ class AndroidBleScanner @Inject constructor(
     // --------------------------------------------------------------------- internals
 
     private fun handleResult(result: ScanResult) {
-        val previous = _devices.value[resolveAddress(result)]
+        val address = resolveAddress(result)
+        val previous = deviceStates[address]
         val rssi = result.rssi
         val smoothed = previous?.let {
             (it.smoothedRssi * SMOOTHING_ALPHA + rssi * (1 - SMOOTHING_ALPHA)).toInt()
@@ -191,9 +211,16 @@ class AndroidBleScanner @Inject constructor(
             ?.txPowerLevel
             ?.takeIf { it != Integer.MIN_VALUE }
 
+        // Jangan menimpa nama yang sudah diketahui dengan nama kosong.
+        val resolvedName = resolveName(result)
+        val name = resolvedName
+            ?: previous?.name?.takeIf { it.isNotBlank() }
+            ?: BleDevice.UNKNOWN_NAME
+        if (resolvedName != null) knownNames[address] = resolvedName
+
         val device = BleDevice(
-            address = resolveAddress(result),
-            name = resolveName(result) ?: previous?.name ?: BleDevice.UNKNOWN_NAME,
+            address = address,
+            name = name,
             rssi = rssi,
             smoothedRssi = smoothed,
             txPower = txPower,
@@ -201,7 +228,8 @@ class AndroidBleScanner @Inject constructor(
             seenCount = (previous?.seenCount ?: 0) + 1,
         )
 
-        _devices.value = _devices.value + (device.address to device)
+        // Ditulis cepat ke buffer; UI hanya dibarui oleh ticker flush (throttle).
+        deviceStates[device.address] = device
     }
 
     private fun resolveAddress(result: ScanResult): String {
@@ -212,24 +240,74 @@ class AndroidBleScanner @Inject constructor(
             ?: "anon-${System.identityHashCode(result.device)}"
     }
 
+    /**
+     * Resolusi nama perangkat dari sumber yang paling bisa dipercaya lebih dulu:
+     * 1. **Nama dari paket advertising** (`ScanRecord`) — ini yang paling umum untuk perangkat BLE.
+     * 2. Nama perangkat yang sudah pernah di-bond/pair (pairing list).
+     * 3. Cache nama lokal dari hasil scan sebelumnya.
+     * 4. `BluetoothDevice.getName()` (membutuhkan izin BLUETOOTH_CONNECT).
+     *
+     * Catatan: tidak semua perangkat mengiklankan namanya (mis. iPhone/Android yang
+     * sedang idle, iBeacon) — sesuai brief, nama ditampilkan "jika ada/tersedia".
+     */
     private fun resolveName(result: ScanResult): String? {
-        // getNamedDevice() butuh BLUETOOTH_CONNECT di Android 12+.
-        val deviceName = runCatching { result.device.name }.getOrNull()
-        return deviceName ?: result.scanRecord?.deviceName?.takeIf { it.isNotBlank() }
+        result.scanRecord
+            ?.deviceName
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return it }
+
+        val address = resolveAddress(result)
+        bondedNames[address]?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
+        knownNames[address]?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
+
+        return runCatching { result.device.name }
+            .getOrNull()
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
     }
 
-    private fun startPruner() {
-        if (prunerJob != null) return
-        prunerJob = scope.launch {
+    /** Membaca daftar perangkat yang sudah di-bond/pair sebagai sumber nama tambahan. */
+    private fun refreshBondedNames() {
+        val bonded = runCatching { adapter?.bondedDevices }.getOrNull() ?: return
+        val mapped = bonded
+            .mapNotNull { device ->
+                val name = runCatching { device.name }.getOrNull()?.trim()
+                val address = runCatching { device.address }.getOrNull()
+                if (name.isNullOrBlank() || address.isNullOrBlank()) null else address to name
+            }
+            .toMap()
+        if (mapped.isNotEmpty()) bondedNames = bondedNames + mapped
+    }
+
+    /**
+     * Ticker flush: memindahkan isi [deviceStates] ke [_devices] setiap
+     * [UI_REFRESH_INTERVAL_MS] sehingga layar maksimal terbarui 1× per interval,
+     * walau paket advertising datang jauh lebih cepat (~10× per detik pada LOW_LATENCY).
+     * Sekaligus membuang perangkat yang tidak terlihat lebih dari [STALE_MS].
+     */
+    private fun startFlushTicker() {
+        if (flushJob != null) return
+        flushJob = scope.launch {
             while (isActive) {
-                delay(PRUNE_INTERVAL_MS)
+                delay(UI_REFRESH_INTERVAL_MS)
                 if (!isScanning) continue
-                val now = System.currentTimeMillis()
-                _devices.value = _devices.value.filterValues {
-                    now - it.lastSeen < STALE_MS
-                }
+                flushDeviceStates(pruneStale = true)
             }
         }
+    }
+
+    private fun stopFlushTicker() {
+        flushJob?.cancel()
+        flushJob = null
+    }
+
+    private fun flushDeviceStates(pruneStale: Boolean) {
+        if (pruneStale) {
+            val now = System.currentTimeMillis()
+            deviceStates.entries.removeAll { now - it.value.lastSeen >= STALE_MS }
+        }
+        _devices.value = deviceStates.toMap()
     }
 
     private fun emitError(message: String) {
@@ -251,7 +329,11 @@ class AndroidBleScanner @Inject constructor(
         /** Perangkat yang tidak terlihat selama ini dikeluarkan dari daftar. */
         const val STALE_MS = 15_000L
 
-        const val PRUNE_INTERVAL_MS = 2_000L
+        /**
+         * Interval throttle tampilan live scan: UI maksimal dibarui 1× per detik,
+         * walau paket advertising datang jauh lebih sering (SCAN_MODE_LOW_LATENCY).
+         */
+        const val UI_REFRESH_INTERVAL_MS = 1_000L
 
         const val ANONYMOUS_ADDRESS = "02:00:00:00:00:00"
     }
