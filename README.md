@@ -15,8 +15,8 @@ lokal (Room) sehingga tidak hilang saat aplikasi ditutup.
 
 | # | Kebutuhan | Implementasi |
 |---|-----------|--------------|
-| 2.1 | Pemindaian perangkat | `AndroidBleScanner` memakai `BluetoothLeScanner` (mode *low latency*). Menampilkan **Nama**, **MAC Address/UUID**, **estimasi jarak**, dan **RSSI mentah (dBm)**. Tombol **Start/Scan** & **Stop** pada `BotBar`. |
-| 2.2 | Filter & pengurutan | Daftar selalu diurutkan otomatis dari **RSSI terkuat** (repository). Search bar memfilter berdasarkan **nama** atau **MAC address**; chip filter membatasi **ambang minimum sinyal** (mis. hanya `≥ -80 dBm`). |
+| 2.1 | Pemindaian perangkat | `AndroidBleScanner` memakai `BluetoothLeScanner` (mode *low latency*) dengan **throttle tampilan 1 detik per flush** agar data live tidak bergetar. Menampilkan **Nama**, **MAC Address/UUID**, **estimasi jarak**, dan **RSSI mentah (dBm)**. Tombol **Start/Scan** & **Stop** pada `BotBar`. |
+| 2.2 | Filter & pengurutan | Daftar selalu diurutkan otomatis dari **RSSI terkuat** (repository, EMA agar stabil). Search bar memfilter berdasarkan **nama** atau **MAC address**; chip filter membatasi **ambang minimum sinyal** (mis. hanya `≥ -80 dBm`, memakai RSSI mentah = angka di layar). |
 | 2.3 | Pelacakan target / Radar | Tap satu perangkat → layar **Detail Pelacakan**: radar beranimasi, jarak & kategori berubah warna mengikuti tabel RSSI, plus kartu detail koneksi (RSSI raw/EMA, Tx Power, terakhir terdeteksi, status Live/Lost). |
 | 2.4 | Penyimpanan lokal | Room (`device_history`): nama, alamat, waktu pertama & terakhir terlihat, RSSI terakhir, RSSI terkuat, jumlah deteksi. |
 | 3.1 | Screen 1: Dashboard (Scanner) | `HomeScreen` |
@@ -179,13 +179,15 @@ com.example.bluetoothfinder
 4. **Nama perangkat** hanya muncul jika perangkat mengiklankannya; jika tidak, ditampilkan
    `Tanpa Nama`.
 5. **Scanning dihentikan otomatis saat aplikasi ke latar belakang** (> 3 detik) — ini disengaja
-   (praktik hemat baterai & anjuran Android). Karena itu data radar berhenti saat background.
+   (praktik hemat baterai & anjuran Android) dan **berlaku di level aplikasi**
+   (`ProcessLifecycleOwner`): berpindah layar (Scanner → Radar) **tidak** menghentikan scan,
+   hanya masuk/keluar aplikasi. Saat kembali ke depan, scan dilanjutkan otomatis.
 6. **Belum ada fitur koneksi/pairing/GATT** — sesuai brief yang hanya meminta pelacakan
    berbasis *advertising* RSSI.
 7. **Android 14+ membatasi hardware scan slot**; pada pemakaian sangat agresif sistem dapat
    memblock scan (error code 2/5 ditangani dan ditampilkan sebagai snackbar).
-8. **Belum ada instrumented test UI/E2E** (hanya unit test logika kategori RSSI) karena
-   keterbatasan waktu 48 jam dan ketergantungan pada perangkat fisik.
+8. **Belum ada instrumented test UI/E2E** (unit test logika kategori RSSI & filter/pengurutan)
+   karena keterbatasan waktu 48 jam dan ketergantungan pada perangkat fisik.
 
 ---
 
@@ -202,7 +204,12 @@ com.example.bluetoothfinder
 - **Asumsi: scan di-pause, bukan dibuang**, saat background — agar pengguna tidak
   kehilangan daftar hasil ketika kembali.
 - **Asumsi: pengurutan memakai RSSI yang sudah dihaluskan (EMA α=0.35)** agar urutan tidak
-  "loncat-loncat"; nilai **RSSI mentah tetap ditampilkan** sesuai brief.
+  "loncat-loncat"; nilai **RSSI mentah tetap ditampilkan** sesuai brief, dan filter ambang
+  juga memakai nilai mentah (angka di layar = angka yang difilter); warna indikator memakai EMA.
+- **Asumsi: tampilan live scan di-throttle 1 detik per flush** (`UI_REFRESH_INTERVAL_MS`).
+  Paket advertising pada `SCAN_MODE_LOW_LATENCY` bisa datang ~10×/detik; semua hasil ditampung
+  buffer in-memory lalu di-flush berkala sehingga daftar tidak bergetar terlalu cepat
+  (`lastSeen` tetap memakai waktu paket asli agar deteksi *Sinyal Hilang* akurat).
 - **Asumsi: penyimpanan riwayat di-throttle 2 detik per perangkat** agar database tidak
   dibanjiri (nilai final selalu di-flush saat scan berhenti).
 - **Dilarangnya location untuk `neverForLocation`** — `BLUETOOTH_SCAN` dideklarasikan
@@ -226,4 +233,6 @@ com.example.bluetoothfinder
 ```
 - `SignalCategoryTest` — memastikan seluruh batas RSSI (± 1 kelas) terpetakan tepat ke
   kategori & label jarak sesuai tabel brief, serta skala radar monoton.
+- `DeviceFilterTest` — pengurutan dari sinyal terkuat (EMA), filter nama/MAC
+  (case-insensitive), dan filter ambang sinyal yang memakai nilai RSSI mentah.
 ```
