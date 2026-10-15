@@ -45,9 +45,9 @@ Pemetaan ini dikodekan pada `domain/SignalCategory.kt` dan diuji lewat unit test
 
 ### Prasyarat
 - **Android Studio** (Ladybug/Meerkat atau lebih baru) dengan **JDK 17+** (build ini dijalankan dengan JDK 21).
-- **Android SDK Platform 37.0** (compileSdk 37) dan Build-Tools yang sesuai.
+- **Android SDK Platform 36** (compileSdk 36) dan Build-Tools yang sesuai.
 - Perangkat fisik dengan BLE (**disarankan**, emulator umumnya tidak memiliki Bluetooth).
-- `minSdk 24` (Android 7.0) s/d `targetSdk 37`.
+- `minSdk 24` (Android 7.0) s/d `targetSdk 36`.
 
 ### Langkah
 ```bash
@@ -200,9 +200,12 @@ com.example.bluetoothfinder
   KSP gagal (`unexpected jvm signature V`). Solusinya: KSP diselaraskan ke
   `2.2.10-2.0.2`, plugin Kotlin/Compose ke `2.2.10`, dan **Room dinaikkan ke 2.7.1**
   (Room 2.6.1 belum kompatibel dengan KSP2).
-- **compileSdk 37 belum diuji resmi oleh AGP 9.0.1** → muncul peringatan kompatibilitas
-  dari Android Gradle Plugin (build tetap sukses). Dapat diredam dengan
-  `android.suppressUnsupportedCompileSdk=37.0` bila diperlukan.
+- **compileSdk diturunkan dari 37.0 ke 36 (stable).** SDK 37.0 hanya dikenali oleh
+  build CLI/AGP, sedangkan Android Studio tidak menemukan target `android-37`
+  (platform terpasang bernama `android-37.0`) sehingga muncul notifikasi
+  *"Could not find compile target android-37"*. Dengan compileSdk 36, project terbuka
+  bersih di Android Studio mana pun (36 didukung resmi AGP 9) dan tidak ada kode
+  yang memakai API di atas 36.
 - **Asumsi: scan di-pause, bukan dibuang**, saat background — agar pengguna tidak
   kehilangan daftar hasil ketika kembali.
 - **Asumsi: pengurutan memakai RSSI yang sudah dihaluskan (EMA α=0.35)** agar urutan tidak
